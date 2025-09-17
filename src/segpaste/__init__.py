@@ -1,6 +1,12 @@
 # Import main functionality here
-from .core import hello_world
+from .copy_paste import CopyPasteAugmentation
+from .data_types import CopyPasteConfig, DetectionTarget
+from .transforms import CopyPasteCollator, CopyPasteTransform
 
 __all__ = [
-    "hello_world",
+    "CopyPasteAugmentation",
+    "CopyPasteConfig",
+    "DetectionTarget",
+    "CopyPasteTransform",
+    "CopyPasteCollator",
 ]
