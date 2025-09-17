@@ -19,10 +19,16 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = []
+dependencies = ["torch>=2.8", "torchvision>=0.23.0"]
 
-[project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "mypy>=1.0"]
+[dependency-groups]
+dev = [
+    "ruff>=0.13.0",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4.0",
+    "mypy>=1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/NoeFontana/segpaste"
