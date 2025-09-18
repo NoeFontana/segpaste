@@ -1,5 +1,6 @@
 """Copy-paste augmentation implementation for PyTorch."""
 
+import random
 from typing import List, Optional, Tuple
 
 import torch
@@ -23,15 +24,15 @@ class CopyPasteAugmentation:
     https://arxiv.org/abs/2012.07177
     """
 
-    def __init__(self, config: Optional[CopyPasteConfig] = None):
+    def __init__(self, config: CopyPasteConfig):
         """Initialize copy-paste augmentation.
 
         Args:
             config: Configuration for copy-paste augmentation
         """
-        self.config = config or CopyPasteConfig()
+        self.config = config
 
-    def __call__(
+    def transform(
         self,
         target_data: DetectionTarget,
         source_objects: List[DetectionTarget],
@@ -46,18 +47,16 @@ class CopyPasteAugmentation:
             Augmented target data
         """
         # Check if we should apply copy-paste
-        if torch.rand(1).item() > self.config.paste_probability:
-            return target_data
-
         if not source_objects or target_data.masks is None:
             return target_data
 
-        # Select objects to paste
+        if random.random() > self.config.paste_probability:
+            return target_data
+
         selected_objects = self._select_objects_to_paste(source_objects)
         if not selected_objects:
             return target_data
 
-        # Apply copy-paste
         return self._apply_copy_paste(target_data, selected_objects)
 
     def _select_objects_to_paste(
@@ -74,14 +73,11 @@ class CopyPasteAugmentation:
         if not source_objects:
             return []
 
-        # Determine number of objects to paste
         max_objects = min(self.config.max_paste_objects, len(source_objects))
         min_objects = min(self.config.min_paste_objects, max_objects)
-        num_to_paste = torch.randint(min_objects, max_objects + 1, (1,)).item()
+        num_to_paste = random.randint(min_objects, max_objects)
 
-        # Randomly select objects
-        indices = torch.randperm(len(source_objects))[:num_to_paste].tolist()
-        selected = [source_objects[i] for i in indices]
+        selected = random.sample(source_objects, num_to_paste)
 
         return selected
 
@@ -109,9 +105,9 @@ class CopyPasteAugmentation:
         _, img_height, img_width = image.shape
 
         # Keep track of pasted boxes for collision detection
-        pasted_boxes = []
-        pasted_masks_list = []
-        pasted_labels_list = []
+        pasted_boxes: list[torch.Tensor] = []
+        pasted_masks_list: list[torch.Tensor] = []
+        pasted_labels_list: list[torch.Tensor] = []
 
         for obj in paste_objects:
             if obj.masks is None or obj.masks.numel() == 0:
@@ -150,31 +146,16 @@ class CopyPasteAugmentation:
         if pasted_masks_list:
             # Add pasted objects to annotations
             pasted_masks = torch.stack(pasted_masks_list, dim=0)
-            pasted_boxes = torch.stack(pasted_boxes, dim=0)
+            pasted_boxes_tensor = torch.stack(pasted_boxes, dim=0)
             pasted_labels = torch.stack(pasted_labels_list, dim=0)
 
-            # Update existing objects for occlusion
-            updated_masks, updated_boxes = self._update_occluded_objects(
-                masks, pasted_masks
+            # Update existing objects for occlusion and filter out heavily occluded ones
+            masks, boxes, labels = self._update_and_filter_occluded_objects(
+                masks, boxes, labels, pasted_masks
             )
 
-            # Filter out heavily occluded objects
-            valid_indices = self._filter_occluded_objects(masks, updated_masks)
-
-            if valid_indices.numel() > 0:
-                boxes = updated_boxes[valid_indices]
-                labels = labels[valid_indices]
-                masks = updated_masks[valid_indices]
-            else:
-                # No original objects left
-                boxes = torch.empty((0, 4), dtype=boxes.dtype, device=boxes.device)
-                labels = torch.empty((0,), dtype=labels.dtype, device=labels.device)
-                masks = torch.empty(
-                    (0, img_height, img_width), dtype=masks.dtype, device=masks.device
-                )
-
             # Concatenate with pasted objects
-            all_boxes = torch.cat([boxes, pasted_boxes], dim=0)
+            all_boxes = torch.cat([boxes, pasted_boxes_tensor], dim=0)
             all_labels = torch.cat([labels, pasted_labels], dim=0)
             all_masks = torch.cat([masks, pasted_masks], dim=0)
         else:
@@ -342,22 +323,27 @@ class CopyPasteAugmentation:
 
         return result_image
 
-    def _update_occluded_objects(
+    def _update_and_filter_occluded_objects(
         self,
         original_masks: torch.Tensor,
+        original_boxes: torch.Tensor,
+        original_labels: torch.Tensor,
         pasted_masks: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Update original object masks and boxes based on occlusion by pasted objects.
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Update masks based on occlusion and filter heavily occluded objects.
 
         Args:
             original_masks: Original object masks [N, H, W]
+            original_boxes: Original bounding boxes [N, 4]
+            original_labels: Original labels [N]
             pasted_masks: Pasted object masks [M, H, W]
-            img_height: Image height
-            img_width: Image width
 
         Returns:
-            Updated masks and boxes
+            Tuple of (filtered_masks, filtered_boxes, filtered_labels)
         """
+        if original_masks.numel() == 0:
+            return original_masks, original_boxes, original_labels
+
         # Combine all pasted masks to create occlusion mask
         occlusion_mask = pasted_masks.sum(dim=0) > 0  # [H, W]
 
@@ -367,32 +353,41 @@ class CopyPasteAugmentation:
             # Remove occluded pixels
             updated_masks[i] = updated_masks[i] * (~occlusion_mask).float()
 
-        # Recompute bounding boxes from updated masks
-        updated_boxes = masks_to_boxes(updated_masks)
-
-        return updated_masks, updated_boxes
-
-    def _filter_occluded_objects(
-        self, original_masks: torch.Tensor, updated_masks: torch.Tensor
-    ) -> torch.Tensor:
-        """Filter out heavily occluded objects.
-
-        Args:
-            original_masks: Original object masks [N, H, W]
-            updated_masks: Updated object masks [N, H, W]
-
-        Returns:
-            Indices of objects to keep
-        """
+        # Compute areas for filtering
         original_areas = compute_mask_area(original_masks)
         updated_areas = compute_mask_area(updated_masks)
 
-        # Compute occlusion ratio
+        # Find valid masks (not completely occluded and below occlusion threshold)
+        valid_mask = updated_areas > 0  # Must have some area left
+
+        # Also check occlusion ratio for objects that still have area
         occlusion_ratios = 1.0 - (updated_areas / (original_areas + 1e-8))
+        occlusion_valid = occlusion_ratios <= self.config.occluded_area_threshold
 
-        # Keep objects with occlusion ratio below threshold
-        valid_indices = torch.where(
-            occlusion_ratios <= self.config.occluded_area_threshold
-        )[0]
+        # Combine both conditions
+        valid_indices = torch.where(valid_mask & occlusion_valid)[0]
 
-        return valid_indices
+        if valid_indices.numel() == 0:
+            # No valid objects remain
+            img_height, img_width = original_masks.shape[1], original_masks.shape[2]
+            empty_masks = torch.empty(
+                (0, img_height, img_width),
+                dtype=original_masks.dtype,
+                device=original_masks.device,
+            )
+            empty_boxes = torch.empty(
+                (0, 4), dtype=original_boxes.dtype, device=original_boxes.device
+            )
+            empty_labels = torch.empty(
+                (0,), dtype=original_labels.dtype, device=original_labels.device
+            )
+            return empty_masks, empty_boxes, empty_labels
+
+        # Filter to keep only valid objects
+        filtered_masks = updated_masks[valid_indices]
+        filtered_labels = original_labels[valid_indices]
+
+        # Recompute bounding boxes from updated masks (only for valid objects)
+        filtered_boxes = masks_to_boxes(filtered_masks)
+
+        return filtered_masks, filtered_boxes, filtered_labels

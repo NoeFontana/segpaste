@@ -1,7 +1,7 @@
 """Type definitions for segpaste package."""
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Literal, Tuple
 
 import torch
 
@@ -40,38 +40,35 @@ class DetectionTarget:
     image: ImageTensor  # Shape: [C, H, W]
     boxes: BoxesTensor  # Shape: [N, 4], format: xyxy
     labels: LabelsTensor  # Shape: [N]
-    masks: Optional[MasksTensor] = None  # Shape: [N, H, W]
+    masks: MasksTensor  # Shape: [N, H, W]
 
     @skip_if_compiling
     def __post_init__(self) -> None:
         """Validate tensor shapes and consistency."""
-        if self.image.dim() != 3:
-            raise ValueError("image must be 3D tensor [C, H, W]")
-        if self.boxes.dim() != 2 or self.boxes.size(1) != 4:
-            raise ValueError("boxes must be 2D tensor [N, 4]")
-        if self.labels.dim() != 1:
-            raise ValueError("labels must be 1D tensor [N]")
         if self.boxes.size(0) != self.labels.size(0):
             raise ValueError("boxes and labels must have same number of objects")
-        if self.masks is not None:
-            if self.masks.dim() != 3:
-                raise ValueError("masks must be 3D tensor [N, H, W]")
-            if self.masks.size(0) != self.boxes.size(0):
-                raise ValueError("masks and boxes must have same number of objects")
+        if self.masks.size(0) != self.boxes.size(0):
+            raise ValueError("masks and boxes must have same number of objects")
 
 
 @dataclass(frozen=True, slots=True)
 class CopyPasteConfig:
     """Configuration for copy-paste augmentation."""
 
+    # Probability of applying copy-paste augmentation
     paste_probability: float = 0.5
-    max_paste_objects: int = 10
+
+    # Minimum and maximum number of objects to paste from source to target
     min_paste_objects: int = 1
+    max_paste_objects: int = 20
+
     scale_range: Tuple[float, float] = (0.1, 2.0)
-    blend_mode: str = "alpha"
+    # Blending mode for pasted objects
+    blend_mode: Literal["alpha", "gaussian"] = "alpha"
+
     occluded_area_threshold: float = 0.3  # Objects with >30% occlusion are removed
     box_update_threshold: float = 10.0  # Minimum pixel difference for box updates
-    enable_rotation: bool = False
+
     enable_flip: bool = True
 
     def __post_init__(self) -> None:

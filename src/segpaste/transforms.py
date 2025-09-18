@@ -1,15 +1,14 @@
 """PyTorch transforms for copy-paste augmentation."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import torch
-from torchvision.transforms.v2 import Transform
 
-from .copy_paste import CopyPasteAugmentation
-from .data_types import CopyPasteConfig, DetectionTarget
+from segpaste.copy_paste import CopyPasteAugmentation
+from segpaste.data_types import CopyPasteConfig, DetectionTarget
 
 
-class CopyPasteTransform(Transform):
+class CopyPasteTransform(torch.nn.Module):
     """PyTorch Transform wrapper for copy-paste augmentation.
 
     This transform can be used in torchvision transform pipelines.
@@ -17,25 +16,25 @@ class CopyPasteTransform(Transform):
     - 'image': torch.Tensor of shape [C, H, W]
     - 'boxes': torch.Tensor of shape [N, 4] in xyxy format
     - 'labels': torch.Tensor of shape [N]
-    - 'masks': torch.Tensor of shape [N, H, W] (optional)
+    - 'masks': torch.Tensor of shape [N, H, W]
     """
 
     def __init__(
         self,
         source_objects: List[DetectionTarget],
-        config: CopyPasteConfig | None = None,
+        augmentation: CopyPasteAugmentation,
     ) -> None:
         """Initialize copy-paste transform.
 
         Args:
             source_objects: List of objects that can be pasted
-            config: Configuration for copy-paste augmentation
+            augmentation: Copy-paste augmentation instance
         """
         super().__init__()
-        self.copy_paste = CopyPasteAugmentation(config)
-        self.source_objects = source_objects
+        self.copy_paste: CopyPasteAugmentation = augmentation
+        self.source_objects: List[DetectionTarget] = source_objects
 
-    def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
+    def forward(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """Apply copy-paste augmentation to sample.
 
         Args:
@@ -49,21 +48,19 @@ class CopyPasteTransform(Transform):
             image=sample["image"],
             boxes=sample["boxes"],
             labels=sample["labels"],
-            masks=sample.get("masks"),
+            masks=sample["masks"],
         )
 
         # Apply copy-paste
-        augmented = self.copy_paste(target_data, self.source_objects)
+        augmented = self.copy_paste.transform(target_data, self.source_objects)
 
         # Convert back to dictionary
         result = {
             "image": augmented.image,
             "boxes": augmented.boxes,
             "labels": augmented.labels,
+            "masks": augmented.masks,
         }
-
-        if augmented.masks is not None:
-            result["masks"] = augmented.masks
 
         # Copy any additional keys from original sample
         for key, value in sample.items():
@@ -89,15 +86,17 @@ class CopyPasteCollator:
     as source objects for pasting.
     """
 
-    def __init__(self, config: CopyPasteConfig | None = None):
+    def __init__(self, config: CopyPasteConfig) -> None:
         """Initialize copy-paste collator.
 
         Args:
             config: Configuration for copy-paste augmentation
         """
-        self.copy_paste = CopyPasteAugmentation(config)
+        self.copy_paste: CopyPasteAugmentation = CopyPasteAugmentation(config)
 
-    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def __call__(
+        self, batch: List[Dict[str, Any]]
+    ) -> Dict[str, Union[torch.Tensor, List[torch.Tensor]]]:
         """Collate batch with copy-paste augmentation.
 
         Args:
@@ -110,12 +109,12 @@ class CopyPasteCollator:
             return {}
 
         # Extract all objects from batch as potential source objects
-        all_objects = []
+        all_objects: List[DetectionTarget] = []
         for sample in batch:
             if "masks" in sample and sample["masks"] is not None:
-                num_objects = sample["masks"].shape[0]
+                num_objects: int = sample["masks"].shape[0]
                 for i in range(num_objects):
-                    obj = DetectionTarget(
+                    obj: DetectionTarget = DetectionTarget(
                         image=sample["image"],
                         boxes=sample["boxes"][i : i + 1],
                         labels=sample["labels"][i : i + 1],
@@ -124,31 +123,32 @@ class CopyPasteCollator:
                     all_objects.append(obj)
 
         # Apply copy-paste to each sample
-        augmented_samples = []
+        augmented_samples: List[Dict[str, Any]] = []
         for sample in batch:
-            target_data = DetectionTarget(
+            target_data: DetectionTarget = DetectionTarget(
                 image=sample["image"],
                 boxes=sample["boxes"],
                 labels=sample["labels"],
-                masks=sample.get("masks"),
+                masks=sample["masks"],
             )
 
             # Use other objects in batch as source objects
-            source_objects = [
+            source_objects: List[DetectionTarget] = [
                 obj
                 for obj in all_objects
                 if not torch.equal(obj.image, target_data.image)
             ]
 
             if source_objects:
-                augmented = self.copy_paste(target_data, source_objects)
-                augmented_sample = {
+                augmented: DetectionTarget = self.copy_paste.transform(
+                    target_data, source_objects
+                )
+                augmented_sample: Dict[str, Any] = {
                     "image": augmented.image,
                     "boxes": augmented.boxes,
                     "labels": augmented.labels,
+                    "masks": augmented.masks,
                 }
-                if augmented.masks is not None:
-                    augmented_sample["masks"] = augmented.masks
 
                 # Copy additional keys
                 for key, value in sample.items():
@@ -162,7 +162,9 @@ class CopyPasteCollator:
         # Standard collation
         return self._collate_samples(augmented_samples)
 
-    def _collate_samples(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _collate_samples(
+        self, samples: List[Dict[str, Any]]
+    ) -> Dict[str, Union[torch.Tensor, List[torch.Tensor]]]:
         """Collate list of samples into batch tensors.
 
         Args:
@@ -174,28 +176,12 @@ class CopyPasteCollator:
         if not samples:
             return {}
 
-        batch = {}
+        batch: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = {}
 
-        # Stack images
         batch["images"] = torch.stack([sample["image"] for sample in samples])
 
-        # Collect variable-length tensors (boxes, labels, masks)
         batch["boxes"] = [sample["boxes"] for sample in samples]
         batch["labels"] = [sample["labels"] for sample in samples]
-
-        if "masks" in samples[0] and samples[0]["masks"] is not None:
-            batch["masks"] = [sample["masks"] for sample in samples]
-
-        # Handle additional keys
-        for key in samples[0]:
-            if key not in ["image", "boxes", "labels", "masks"]:
-                if isinstance(samples[0][key], torch.Tensor):
-                    try:
-                        batch[key] = torch.stack([sample[key] for sample in samples])
-                    except RuntimeError:
-                        # Variable size tensors
-                        batch[key] = [sample[key] for sample in samples]
-                else:
-                    batch[key] = [sample[key] for sample in samples]
+        batch["masks"] = [sample["masks"] for sample in samples]
 
         return batch

@@ -23,10 +23,6 @@ def alpha_blend(
     if mask.dim() == 2:
         mask = mask.unsqueeze(0)  # Add channel dimension
 
-    # Ensure mask has same number of channels as images
-    if mask.shape[0] == 1 and source.shape[0] > 1:
-        mask = mask.repeat(source.shape[0], 1, 1)
-
     # Apply alpha blending
     blended: torch.Tensor = target * (1.0 - alpha * mask) + source * (alpha * mask)
 
