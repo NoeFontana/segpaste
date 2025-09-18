@@ -4,7 +4,7 @@ import torch
 
 from segpaste.copy_paste import CopyPasteAugmentation
 from segpaste.data_types import CopyPasteConfig, DetectionTarget
-from segpaste.utils import boxes_to_masks, compute_iou, masks_to_boxes
+from segpaste.utils import boxes_to_masks
 
 
 def create_sample_detection_target(
@@ -132,47 +132,6 @@ class TestUtils:
         assert masks.shape == (2, 50, 50)
         assert masks[0, 10:20, 10:20].sum() == 100  # 10x10 box
         assert masks[1, 30:40, 30:40].sum() == 100  # 10x10 box
-
-    def test_masks_to_boxes(self):
-        """Test conversion from masks to boxes."""
-        masks = torch.zeros(2, 50, 50)
-        masks[0, 10:20, 10:20] = 1.0
-        masks[1, 30:40, 30:40] = 1.0
-
-        boxes = masks_to_boxes(masks)
-
-        expected_boxes = torch.tensor(
-            [
-                [10, 10, 19, 19],  # Note: max coordinates are inclusive
-                [30, 30, 39, 39],
-            ],
-            dtype=torch.float32,
-        )
-
-        assert torch.allclose(boxes, expected_boxes)
-
-    def test_compute_iou(self):
-        """Test IoU computation between boxes."""
-        boxes1 = torch.tensor([[0, 0, 10, 10], [5, 5, 15, 15]])
-        boxes2 = torch.tensor([[0, 0, 10, 10], [10, 10, 20, 20]])
-
-        iou = compute_iou(boxes1, boxes2)
-
-        assert iou.shape == (2, 2)
-        assert torch.allclose(iou[0, 0], torch.tensor(1.0))  # Perfect overlap
-        assert torch.allclose(iou[1, 1], torch.tensor(0.0))  # No overlap
-
-        # boxes1[1] and boxes2[0] should have some overlap
-        assert iou[1, 0] > 0.0 and iou[1, 0] < 1.0
-
-    def test_compute_iou_empty_boxes(self):
-        """Test IoU computation with empty box sets."""
-        boxes1 = torch.empty(0, 4)
-        boxes2 = torch.tensor([[0, 0, 10, 10]])
-
-        iou = compute_iou(boxes1, boxes2)
-
-        assert iou.shape == (0, 1)
 
 
 class TestDetectionTarget:

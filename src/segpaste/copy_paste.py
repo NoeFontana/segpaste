@@ -4,14 +4,14 @@ from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+from torchvision.ops import masks_to_boxes
 
-from .blending import blend_with_mode, create_smooth_mask_border
-from .data_types import CopyPasteConfig, DetectionTarget
-from .utils import (
+from segpaste.blending import blend_with_mode, create_smooth_mask_border
+from segpaste.data_types import CopyPasteConfig, DetectionTarget
+from segpaste.utils import (
     check_collision,
     compute_mask_area,
     get_random_placement,
-    masks_to_boxes,
 )
 
 
@@ -216,9 +216,8 @@ class CopyPasteAugmentation:
         source_h, source_w = source_image.shape[1], source_image.shape[2]
 
         # Apply random scaling
-        scale_factor = torch.uniform(
-            self.config.scale_range[0], self.config.scale_range[1]
-        ).item()
+        scale_min, scale_max = self.config.scale_range
+        scale_factor = torch.rand(1).item() * (scale_max - scale_min) + scale_min
 
         if scale_factor != 1.0:
             new_h = int(source_h * scale_factor)

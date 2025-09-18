@@ -13,8 +13,8 @@ test-cov:  ## Run tests with coverage
 	pytest --cov=segpaste --cov-report=html --cov-report=term-missing
 
 format:  ## Lint and format code
-	uv run ruff check --fix src tests
-	uv run ruff format src tests
+	uv run ruff check --fix src tests examples
+	uv run ruff format src tests examples
 
 clean:  ## Clean build artifacts
 	rm -rf build/
