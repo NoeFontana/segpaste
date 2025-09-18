@@ -4,6 +4,7 @@ from typing import Tuple
 
 import torch
 import torch.nn.functional as F
+from torchvision.ops import box_iou
 
 
 def boxes_to_masks(boxes: torch.Tensor, height: int, width: int) -> torch.Tensor:
@@ -38,51 +39,6 @@ def boxes_to_masks(boxes: torch.Tensor, height: int, width: int) -> torch.Tensor
     masks = (x_grid >= x1) & (x_grid <= x2) & (y_grid >= y1) & (y_grid <= y2)
 
     return masks.float()
-
-
-def masks_to_boxes(masks: torch.Tensor) -> torch.Tensor:
-    """Convert binary masks to bounding boxes.
-
-    Args:
-        masks: Binary masks of shape [N, H, W]
-
-    Returns:
-        Bounding boxes of shape [N, 4] in xyxy format
-    """
-    if masks.numel() == 0:
-        return torch.zeros((0, 4), dtype=torch.float32, device=masks.device)
-
-    n = masks.shape[0]
-    boxes = torch.zeros((n, 4), dtype=torch.float32, device=masks.device)
-
-    for i in range(n):
-        mask = masks[i]
-        if mask.sum() == 0:
-            continue
-
-        # Find nonzero coordinates
-        nonzero_indices = mask.nonzero()
-        y_coords = nonzero_indices[:, 0]
-        x_coords = nonzero_indices[:, 1]
-
-        boxes[i, 0] = x_coords.min().float()  # x1
-        boxes[i, 1] = y_coords.min().float()  # y1
-        boxes[i, 2] = x_coords.max().float()  # x2
-        boxes[i, 3] = y_coords.max().float()  # y2
-
-    return boxes
-
-
-def compute_box_area(boxes: torch.Tensor) -> torch.Tensor:
-    """Compute area of bounding boxes.
-
-    Args:
-        boxes: Tensor of shape [N, 4] in xyxy format
-
-    Returns:
-        Areas of shape [N]
-    """
-    return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
 
 
 def compute_mask_area(masks: torch.Tensor) -> torch.Tensor:
@@ -239,32 +195,5 @@ def check_collision(
         return False
 
     # Compute IoU
-    ious = compute_iou(new_box.unsqueeze(0), existing_boxes)
-    return (ious > iou_threshold).any().item()
-
-
-def compute_iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
-    """Compute IoU between two sets of boxes.
-
-    Args:
-        boxes1: First set of boxes [N, 4] in xyxy format
-        boxes2: Second set of boxes [M, 4] in xyxy format
-
-    Returns:
-        IoU matrix of shape [N, M]
-    """
-    # Compute intersection
-    lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N, M, 2]
-    rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N, M, 2]
-
-    wh = (rb - lt).clamp(min=0)  # [N, M, 2]
-    intersection = wh[:, :, 0] * wh[:, :, 1]  # [N, M]
-
-    # Compute union
-    area1 = compute_box_area(boxes1)  # [N]
-    area2 = compute_box_area(boxes2)  # [M]
-    union = area1[:, None] + area2 - intersection
-
-    # Avoid division by zero
-    iou = intersection / (union + 1e-8)
-    return iou
+    ious = box_iou(new_box.unsqueeze(0), existing_boxes)
+    return (ious > iou_threshold).any().item()  # type: ignore

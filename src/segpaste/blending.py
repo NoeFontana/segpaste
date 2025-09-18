@@ -1,5 +1,7 @@
 """Blending operations for copy-paste augmentation."""
 
+from typing import Any
+
 import torch
 import torch.nn.functional as F
 
@@ -26,7 +28,7 @@ def alpha_blend(
         mask = mask.repeat(source.shape[0], 1, 1)
 
     # Apply alpha blending
-    blended = target * (1.0 - alpha * mask) + source * (alpha * mask)
+    blended: torch.Tensor = target * (1.0 - alpha * mask) + source * (alpha * mask)
 
     return blended
 
@@ -70,7 +72,7 @@ def gaussian_blend(
         blurred_mask = blurred_mask.repeat(source.shape[0], 1, 1)
 
     # Apply blending
-    blended = target * (1.0 - blurred_mask) + source * blurred_mask
+    blended: torch.Tensor = target * (1.0 - blurred_mask) + source * blurred_mask
 
     return blended
 
@@ -166,7 +168,7 @@ def blend_with_mode(
     target: torch.Tensor,
     mask: torch.Tensor,
     mode: str = "alpha",
-    **kwargs,
+    **kwargs: Any,
 ) -> torch.Tensor:
     """Apply blending with specified mode.
 
