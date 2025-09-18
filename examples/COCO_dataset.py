@@ -123,7 +123,8 @@ def main() -> None:
     parser.add_argument(
         "mode",
         choices=["download", "visualize", "augment"],
-        help="Mode to run: download dataset, visualize samples, or show copy-paste augmentation",
+        help="Mode to run: download dataset, visualize samples, or "
+        "show copy-paste augmentation",
     )
     parser.add_argument(
         "--num-samples",

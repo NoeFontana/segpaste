@@ -2517,7 +2517,7 @@ wheels = [
 
 [[package]]
 name = "segpaste"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "torch" },
@@ -2528,8 +2528,6 @@ dependencies = [
 coco = [
     { name = "faster-coco-eval" },
     { name = "fiftyone" },
-    { name = "matplotlib" },
-    { name = "requests" },
 ]
 dev = [
     { name = "mypy" },
@@ -2548,8 +2546,6 @@ requires-dist = [
 coco = [
     { name = "faster-coco-eval", specifier = ">=1.6.8" },
     { name = "fiftyone", specifier = ">=1.8.0" },
-    { name = "matplotlib", specifier = ">=3.10.6" },
-    { name = "requests", specifier = ">=2.32.5" },
 ]
 dev = [
     { name = "mypy", specifier = ">=1.0" },
