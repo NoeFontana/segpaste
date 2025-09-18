@@ -70,18 +70,8 @@ def create_coco_dataset(
         """Extract labels tensor from the sample structure."""
         target = sample[1]
 
-        try:
-            return (target["boxes"], target["masks"], target["labels"])  # type: ignore
-        except KeyError:
-            breakpoint()
-
-            h, w = sample[0].shape[-2:]
-            boxes = tv_tensors.BoundingBoxes(
-                torch.empty((0, 4)), format="XYXY", canvas_size=(h, w)
-            )
-            masks = tv_tensors.Mask(torch.empty((0, h, w), dtype=torch.uint8))
-            labels = torch.empty((0,), dtype=torch.int64)
-            return boxes, masks, labels
+        # TODO: Handle the case where there are no instances
+        return (target["boxes"], target["masks"], target["labels"])  # type: ignore
 
     dataset = wrap_dataset_for_transforms_v2(
         FilteredCocoDetection(
