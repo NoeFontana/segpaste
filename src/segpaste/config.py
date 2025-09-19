@@ -1,54 +1,7 @@
-"""Type definitions for segpaste package."""
+"""Configuration classes for copy-paste augmentation."""
 
 from dataclasses import dataclass
 from typing import Literal, Tuple
-
-import torch
-
-from segpaste.compile_util import skip_if_compiling
-
-
-@dataclass(frozen=True, slots=True)
-class BoundingBox:
-    """Bounding box in xyxy format (x1, y1, x2, y2)."""
-
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-
-    @skip_if_compiling
-    def __post_init__(self) -> None:
-        """Validate bounding box coordinates."""
-        if self.x1 >= self.x2:
-            raise ValueError("x1 must be < x2")
-        if self.y1 >= self.y2:
-            raise ValueError("y1 must be < y2")
-
-
-# Type aliases
-ImageTensor = torch.Tensor  # [C, H, W]
-BoxesTensor = torch.Tensor  # [N, 4]
-MasksTensor = torch.Tensor  # [N, H, W]
-LabelsTensor = torch.Tensor  # [N]
-
-
-@dataclass(slots=True)  # Not frozen since it may be modified during augmentation
-class DetectionTarget:
-    """Detection target containing image and annotations."""
-
-    image: ImageTensor  # Shape: [C, H, W]
-    boxes: BoxesTensor  # Shape: [N, 4], format: xyxy
-    labels: LabelsTensor  # Shape: [N]
-    masks: MasksTensor  # Shape: [N, H, W]
-
-    @skip_if_compiling
-    def __post_init__(self) -> None:
-        """Validate tensor shapes and consistency."""
-        if self.boxes.size(0) != self.labels.size(0):
-            raise ValueError("boxes and labels must have same number of objects")
-        if self.masks.size(0) != self.boxes.size(0):
-            raise ValueError("masks and boxes must have same number of objects")
 
 
 @dataclass(frozen=True, slots=True)

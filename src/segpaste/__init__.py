@@ -5,11 +5,13 @@ try:
     _faster_coco_eval.init_as_pycocotools()
 except ImportError:
     pass
-
-
-from .copy_paste import CopyPasteAugmentation
-from .data_types import CopyPasteConfig, DetectionTarget
-from .transforms import CopyPasteCollator, CopyPasteTransform
+from segpaste.augmentation import (
+    CopyPasteAugmentation,
+    CopyPasteCollator,
+    CopyPasteTransform,
+)
+from segpaste.config import CopyPasteConfig
+from segpaste.types import DetectionTarget
 
 __all__ = [
     "CopyPasteAugmentation",

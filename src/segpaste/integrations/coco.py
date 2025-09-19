@@ -8,12 +8,12 @@ from torchvision.transforms import v2
 from torchvision.tv_tensors._dataset_wrapper import wrap_dataset_for_transforms_v2
 
 
-class FilteredCocoDetection(CocoDetection):
+class FilteredCocoDetection(CocoDetection):  # type: ignore[misc]
     def __init__(
         self,
         image_folder: str,
         label_path: str,
-        transforms: Callable | None = None,
+        transforms: Callable | None = None,  # type: ignore[type-arg]
     ):
         # First, initialize the parent class
         super().__init__(root=image_folder, annFile=label_path, transforms=transforms)
@@ -47,7 +47,7 @@ def labels_getter(
 
 def create_coco_dataset(
     image_folder: str, label_path: str, transforms: v2.Transform, batch_size: int = 4
-) -> torch.utils.data.DataLoader:
+) -> torch.utils.data.DataLoader:  # type: ignore[type-arg]
     """Create COCO dataset and dataloader for testing.
 
     Args:
@@ -84,7 +84,7 @@ def create_coco_dataset(
     )
 
     return torch.utils.data.DataLoader(
-        dataset,  # type: ignore
+        dataset,  # pyright: ignore[reportArgumentType]
         batch_size=batch_size,
         shuffle=False,
         collate_fn=coco_collate_fn,

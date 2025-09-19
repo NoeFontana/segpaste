@@ -12,12 +12,15 @@ import torch
 import torchvision
 from torchvision.transforms import v2
 
-from segpaste.copy_paste import CopyPasteAugmentation
-from segpaste.data_types import CopyPasteConfig, DetectionTarget
-from segpaste.dataset import create_coco_dataset, labels_getter
-from segpaste.lsj import make_large_scale_jittering
-from segpaste.transforms import CopyPasteCollator
-from segpaste.utils import boxes_to_masks
+from segpaste.augmentation import (
+    CopyPasteAugmentation,
+    CopyPasteCollator,
+    make_large_scale_jittering,
+)
+from segpaste.config import CopyPasteConfig
+from segpaste.integrations import create_coco_dataset, labels_getter
+from segpaste.processing import boxes_to_masks
+from segpaste.types import DetectionTarget
 
 
 def create_sample_detection_target(
