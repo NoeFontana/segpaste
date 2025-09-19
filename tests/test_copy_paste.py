@@ -10,10 +10,11 @@ import numpy as np
 import pytest
 import torch
 import torchvision
+from torchvision.transforms import v2
 
 from segpaste.copy_paste import CopyPasteAugmentation
 from segpaste.data_types import CopyPasteConfig, DetectionTarget
-from segpaste.dataset import create_coco_dataset
+from segpaste.dataset import create_coco_dataset, labels_getter
 from segpaste.transforms import CopyPasteCollator
 from segpaste.utils import boxes_to_masks
 
@@ -40,6 +41,32 @@ def create_sample_detection_target(
         masks[i, y1:y2, x1:x2] = 1.0
 
     return DetectionTarget(image=image, boxes=boxes, labels=labels, masks=masks)
+
+
+def generate_resize_transform_strategy() -> v2.Transform:
+    return v2.Compose(
+        [
+            v2.ToImage(),
+            v2.Resize(size=(256, 256)),
+            v2.RandomHorizontalFlip(),
+            v2.ClampBoundingBoxes(),
+            v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
+            v2.ToDtype(torch.float32, scale=True),
+        ]
+    )
+
+
+def generate_scale_jitter_transform_strategy() -> v2.Transform:
+    return v2.Compose(
+        [
+            v2.ToImage(),
+            v2.ScaleJitter(target_size=(256, 256)),
+            v2.RandomHorizontalFlip(),
+            v2.ClampBoundingBoxes(),
+            v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
+            v2.ToDtype(torch.float32, scale=True),
+        ]
+    )
 
 
 class TestCopyPasteAugmentation:
@@ -144,7 +171,14 @@ class TestCopyPasteCollator:
         result = collator([])
         assert result == {}
 
-    def test_collator_with_coco_dataset(self) -> None:
+    @pytest.mark.parametrize(
+        "transforms",
+        [
+            generate_resize_transform_strategy(),
+            generate_scale_jitter_transform_strategy(),
+        ],
+    )
+    def test_collator_with_coco_dataset(self, transforms: v2.Transform) -> None:
         """Test CopyPasteCollator with real COCO dataset."""
         # Set random seeds for reproducibility
         torch.manual_seed(42)
@@ -163,7 +197,10 @@ class TestCopyPasteCollator:
             pytest.skip(f"COCO dataset not found at {dataset_path}")
 
         dataloader: torch.utils.data.DataLoader = create_coco_dataset(
-            image_folder=val_images_path, label_path=annotations_path, batch_size=4
+            image_folder=val_images_path,
+            label_path=annotations_path,
+            transforms=transforms,
+            batch_size=4,
         )
 
         # Get a batch of samples
@@ -185,14 +222,17 @@ class TestCopyPasteCollator:
             # Apply collator to batch
             collated_batch: Dict[str, Any] = collator(batch_samples)
 
-            torchvision.utils.save_image(
-                [sample["image"] for sample in batch_samples],
-                f"original_images_{i}.png",
-                nrow=4,
-            )
-            torchvision.utils.save_image(
-                collated_batch["images"], f"pasted_image_{i}.png", nrow=4
-            )
+            if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
+                torchvision.utils.save_image(
+                    [sample["image"] for sample in batch_samples],
+                    f"./data/original_image_{i}.png",
+                    nrow=4,
+                )
+                torchvision.utils.save_image(
+                    collated_batch["images"],
+                    f"./data/pasted_image_{i}.png",
+                    nrow=4,
+                )
 
             # Verify collated batch structure
             assert "images" in collated_batch
