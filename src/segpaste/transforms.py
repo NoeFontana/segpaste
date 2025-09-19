@@ -99,6 +99,8 @@ class CopyPasteCollator:
     ) -> Dict[str, Union[torch.Tensor, List[torch.Tensor]]]:
         """Collate batch with copy-paste augmentation.
 
+        #TODO: If images are padded, ensure pasting happens in the valid image area.
+
         Args:
             batch: List of sample dictionaries
 
