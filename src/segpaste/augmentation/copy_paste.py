@@ -7,13 +7,15 @@ import torch
 import torch.nn.functional as F
 from torchvision.ops import masks_to_boxes
 
-from segpaste.blending import blend_with_mode, create_smooth_mask_border
-from segpaste.data_types import CopyPasteConfig, DetectionTarget
-from segpaste.utils import (
+from segpaste.config import CopyPasteConfig
+from segpaste.processing import (
+    blend_with_mode,
     check_collision,
     compute_mask_area,
+    create_smooth_mask_border,
     get_random_placement,
 )
+from segpaste.types import DetectionTarget
 
 
 class CopyPasteAugmentation:

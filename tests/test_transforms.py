@@ -10,8 +10,12 @@ import torchvision
 from torchvision import tv_tensors
 from torchvision.transforms.v2 import functional as F
 
-from segpaste.data_types import DetectionTarget
-from segpaste.lsj import FixedSizeCrop, RandomResize, make_large_scale_jittering
+from segpaste.augmentation import (
+    FixedSizeCrop,
+    RandomResize,
+    make_large_scale_jittering,
+)
+from segpaste.types import DetectionTarget
 
 
 def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:

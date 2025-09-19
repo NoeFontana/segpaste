@@ -4,8 +4,9 @@ from typing import Any, Dict, List, Union
 
 import torch
 
-from segpaste.copy_paste import CopyPasteAugmentation
-from segpaste.data_types import CopyPasteConfig, DetectionTarget
+from segpaste.augmentation import CopyPasteAugmentation
+from segpaste.config import CopyPasteConfig
+from segpaste.types import DetectionTarget
 
 
 class CopyPasteTransform(torch.nn.Module):

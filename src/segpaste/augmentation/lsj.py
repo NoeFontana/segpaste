@@ -11,7 +11,7 @@ from torchvision.transforms.v2 import (
 from torchvision.transforms.v2 import functional as F
 
 
-class RandomResize(Transform):
+class RandomResize(Transform):  # type: ignore[misc]
     def __init__(
         self,
         min_scale: float,
@@ -54,7 +54,7 @@ class RandomResize(Transform):
         return self._call_kernel(F.resize, inpt, [new_h, new_w])
 
 
-class FixedSizeCrop(Transform):
+class FixedSizeCrop(Transform):  # type: ignore[misc]
     def __init__(
         self,
         output_height: int,
