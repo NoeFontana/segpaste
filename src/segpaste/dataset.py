@@ -27,7 +27,7 @@ class FilteredCocoDetection(CocoDetection):
         ]
         logger = logging.getLogger(__name__)
         logger.info(
-            f"Original number of images: {len(all_ids)}\n"
+            f"Original number of images: {len(all_ids)}. "
             f"Number of images with annotations: {len(self.ids)}"
         )
 
