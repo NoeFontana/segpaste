@@ -2,7 +2,7 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import pytest
 import torch
@@ -10,7 +10,10 @@ import torchvision
 from torchvision import tv_tensors
 from torchvision.transforms.v2 import functional as F
 
-from segpaste.lsj import FixedSizeCrop, RandomResize
+from segpaste.lsj import FixedSizeCrop, RandomResize, make_large_scale_jittering
+from segpaste.transforms import CopyPasteTransform, CopyPasteCollator
+from segpaste.copy_paste import CopyPasteAugmentation
+from segpaste.data_types import CopyPasteConfig, DetectionTarget
 
 
 def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:
@@ -56,6 +59,37 @@ def create_test_mask(size: Tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
                     mask[i, j] = 4
 
     return tv_tensors.Mask(mask)
+
+
+def create_detection_target(
+    image_size: Tuple[int, int, int] = (3, 224, 224),
+    num_objects: int = 3,
+) -> DetectionTarget:
+    """Create a test detection target with boxes, labels, and masks."""
+    c, h, w = image_size
+    image = create_test_image(image_size)
+
+    # Create random boxes
+    boxes = torch.rand(num_objects, 4) * torch.tensor([w, h, w, h])
+    # Ensure boxes are valid (x1 < x2, y1 < y2)
+    boxes[:, 2] = torch.clamp(boxes[:, 2], boxes[:, 0] + 10, w)
+    boxes[:, 3] = torch.clamp(boxes[:, 3], boxes[:, 1] + 10, h)
+
+    # Create random labels
+    labels = torch.randint(1, 6, (num_objects,))
+
+    # Create masks for each object
+    masks = torch.zeros(num_objects, h, w, dtype=torch.uint8)
+    for i in range(num_objects):
+        x1, y1, x2, y2 = boxes[i].int()
+        masks[i, y1:y2, x1:x2] = 1
+
+    return DetectionTarget(
+        image=image,
+        boxes=boxes,
+        labels=labels,
+        masks=masks,
+    )
 
 
 class TestRandomResize:
@@ -384,65 +418,6 @@ class TestFixedSizeCrop:
         assert transform.img_pad_value == 0
         assert transform.seg_pad_value == 255
 
-    def test_get_crop_params_larger_input(self) -> None:
-        """Test crop parameter generation when input is larger than output."""
-        transform = FixedSizeCrop(output_height=128, output_width=128)
-
-        # Input larger than output
-        image = create_test_image((3, 224, 224))
-
-        # Test multiple parameter generations for randomness
-        offsets = []
-        for _ in range(10):
-            params = transform._get_crop_params([image])
-            offset_top = params["offset_top"]
-            offset_left = params["offset_left"]
-
-            # Check bounds
-            assert 0 <= offset_top <= 224 - 128
-            assert 0 <= offset_left <= 224 - 128
-
-            offsets.append((offset_top, offset_left))
-
-        # Should have some variation in random offsets
-        assert len(set(offsets)) > 1 or len(offsets) == 1  # Allow for edge case
-
-    def test_get_crop_params_smaller_input(self) -> None:
-        """Test crop parameter generation when input is smaller than output."""
-        transform = FixedSizeCrop(output_height=256, output_width=256)
-
-        # Input smaller than output
-        image = create_test_image((3, 128, 128))
-
-        params = transform._get_crop_params([image])
-
-        # When input is smaller, offsets should be 0
-        assert params["offset_top"] == 0
-        assert params["offset_left"] == 0
-
-    def test_get_crop_params_exact_size(self) -> None:
-        """Test crop parameter generation when input equals output size."""
-        transform = FixedSizeCrop(output_height=224, output_width=224)
-
-        image = create_test_image((3, 224, 224))
-
-        params = transform._get_crop_params([image])
-
-        # When sizes match exactly, offsets should be 0
-        assert params["offset_top"] == 0
-        assert params["offset_left"] == 0
-
-    def test_get_pad_params(self) -> None:
-        """Test pad parameter generation."""
-        transform = FixedSizeCrop(output_height=256, output_width=256)
-
-        image = create_test_image((3, 128, 128))
-
-        pad_params = transform._get_pad_params([image])
-
-        # Currently returns empty dict - test this behavior
-        assert pad_params == {}
-
     def test_make_params(self) -> None:
         """Test parameter creation combining crop and pad params."""
         transform = FixedSizeCrop(output_height=128, output_width=128)
@@ -741,7 +716,7 @@ class TestFixedSizeCrop:
 
             # Generate parameters multiple times
             for _ in range(10):
-                params = transform._get_crop_params([image])
+                params = transform.make_params([image])
 
                 # Check bounds
                 max_top = max(0, h - 64)
@@ -749,3 +724,262 @@ class TestFixedSizeCrop:
 
                 assert 0 <= params["offset_top"] <= max_top
                 assert 0 <= params["offset_left"] <= max_left
+
+
+class TestLargeScaleJittering:
+    """Test cases for make_large_scale_jittering function."""
+
+    def test_transform_pipeline_basic(self) -> None:
+        """Test that the complete pipeline works."""
+        transform = make_large_scale_jittering(
+            output_size=128,
+            min_scale=1.0,  # Fixed scale for predictable testing
+            max_scale=1.0,
+        )
+
+        image = create_test_image((3, 256, 256))
+        result = transform(image)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, 128, 128)
+
+    def test_transform_pipeline_with_mask(self) -> None:
+        """Test pipeline with mask input."""
+        transform = make_large_scale_jittering(
+            output_size=64,
+            min_scale=0.5,
+            max_scale=0.5,
+            seg_pad_value=200,
+        )
+
+        mask = create_test_mask((128, 128))
+        result = transform(mask)
+
+        assert isinstance(result, tv_tensors.Mask)
+        assert result.shape == (64, 64)
+
+    def test_reproducibility_with_seed(self) -> None:
+        """Test pipeline reproducibility with random seed."""
+        transform = make_large_scale_jittering(
+            output_size=100,
+            min_scale=0.8,
+            max_scale=1.2,
+        )
+
+        image = create_test_image((3, 200, 200))
+
+        # Set seed and get first result
+        random.seed(42)
+        result1 = transform(image)
+
+        # Set same seed and get second result
+        random.seed(42)
+        result2 = transform(image)
+
+        # Results should be identical
+        assert torch.equal(result1, result2)
+
+    @pytest.mark.parametrize("output_size", [64, 128, 256, (128, 256), (256, 128)])
+    def test_different_output_sizes(
+        self, output_size: Union[int, Tuple[int, int]]
+    ) -> None:
+        """Test with different output sizes."""
+        transform = make_large_scale_jittering(
+            output_size=output_size,
+            min_scale=1.0,
+            max_scale=1.0,
+        )
+
+        image = create_test_image((3, 200, 200))
+        result = transform(image)
+
+        expected_shape = (
+            (3, output_size, output_size)
+            if isinstance(output_size, int)
+            else (3, output_size[0], output_size[1])
+        )
+        assert result.shape == expected_shape
+
+    @pytest.mark.parametrize(
+        "min_scale,max_scale", [(0.1, 0.5), (0.5, 1.0), (1.0, 2.0), (0.1, 3.0)]
+    )
+    def test_different_scale_ranges(self, min_scale: float, max_scale: float) -> None:
+        """Test with different scale ranges."""
+        transform = make_large_scale_jittering(
+            output_size=128,
+            min_scale=min_scale,
+            max_scale=max_scale,
+        )
+
+        image = create_test_image((3, 100, 100))
+
+        # Test multiple times to ensure it works consistently
+        for _ in range(5):
+            result = transform(image)
+            assert isinstance(result, tv_tensors.Image)
+            assert result.shape == (3, 128, 128)
+
+    def test_extreme_scale_values(self) -> None:
+        """Test with extreme scale values."""
+        # Very small scale
+        transform_small = make_large_scale_jittering(
+            output_size=64,
+            min_scale=0.01,
+            max_scale=0.1,
+        )
+
+        image = create_test_image((3, 200, 200))
+        result = transform_small(image)
+        assert result.shape == (3, 64, 64)
+
+        # Very large scale
+        transform_large = make_large_scale_jittering(
+            output_size=64,
+            min_scale=5.0,
+            max_scale=10.0,
+        )
+
+        small_image = create_test_image((3, 32, 32))
+        result = transform_large(small_image)
+        assert result.shape == (3, 64, 64)
+
+    def test_padding_behavior(self) -> None:
+        """Test that padding values are correctly applied."""
+        transform = make_large_scale_jittering(
+            output_size=200,
+            min_scale=0.5,  # This will make input smaller
+            max_scale=0.5,
+            img_pad_value=100,
+            seg_pad_value=150,
+        )
+
+        # Test with image
+        image = create_test_image((3, 100, 100))
+        result_img = transform(image)
+        assert result_img.shape == (3, 200, 200)
+
+        # Test with mask
+        mask = create_test_mask((100, 100))
+        result_mask = transform(mask)
+        assert result_mask.shape == (200, 200)
+
+    def test_aspect_ratio_preservation_in_pipeline(self) -> None:
+        """Test that aspect ratio is preserved through the pipeline."""
+        transform = make_large_scale_jittering(
+            output_size=128,
+            min_scale=1.0,
+            max_scale=1.0,
+        )
+
+        # Test with rectangular image
+        rect_image = create_test_image((3, 64, 128))  # 1:2 aspect ratio
+        result = transform(rect_image)
+
+        # Output should always be square due to FixedSizeCrop
+        assert result.shape == (3, 128, 128)
+
+    @pytest.mark.parametrize(
+        "name,min_scale,max_scale,img_pad_value",
+        [
+            ("small_scale", 0.1, 0.5, 255),
+            ("medium_scale", 0.5, 1.0, 128),
+            ("wide_range", 0.1, 2.0, 0),
+        ],
+    )
+    def test_visual_output_pipeline(
+        self,
+        tmp_path: Path,
+        name: str,
+        min_scale: float,
+        max_scale: float,
+        img_pad_value: int,
+    ) -> None:
+        """Test visual output of the complete pipeline."""
+        if os.environ.get("SAVE_TEST_IMAGES", "0") != "1":
+            pytest.skip("SAVE_TEST_IMAGES not enabled")
+
+        logger = logging.getLogger("test_lsj_pipeline")
+        logger.info(f"Images will be saved to {tmp_path}")
+
+        original_image = create_test_image((3, 200, 200))
+        torchvision.utils.save_image(
+            original_image / 255.0, f"{tmp_path}/lsj_original.png"
+        )
+
+        transform = make_large_scale_jittering(
+            output_size=256,
+            min_scale=min_scale,
+            max_scale=max_scale,
+            img_pad_value=img_pad_value,
+        )
+
+        # Generate multiple samples to show variation
+        for i in range(3):
+            random.seed(i)
+            result = transform(original_image)
+            torchvision.utils.save_image(
+                result / 255.0,
+                f"{tmp_path}/lsj_{name}_sample_{i}.png",
+            )
+
+    def test_edge_case_very_small_input(self) -> None:
+        """Test pipeline with very small input images."""
+        transform = make_large_scale_jittering(
+            output_size=64,
+            min_scale=1.0,
+            max_scale=5.0,
+        )
+
+        tiny_image = create_test_image((3, 8, 8))
+        result = transform(tiny_image)
+        assert result.shape == (3, 64, 64)
+
+    def test_edge_case_very_large_input(self) -> None:
+        """Test pipeline with very large input images."""
+        transform = make_large_scale_jittering(
+            output_size=128,
+            min_scale=0.1,
+            max_scale=0.3,
+        )
+
+        large_image = create_test_image((3, 1000, 1000))
+        result = transform(large_image)
+        assert result.shape == (3, 128, 128)
+
+    def test_multiple_channels(self) -> None:
+        """Test pipeline with different numbers of channels."""
+        transform = make_large_scale_jittering(output_size=64)
+
+        # Test RGB
+        rgb_image = create_test_image((3, 128, 128))
+        result = transform(rgb_image)
+        assert result.shape == (3, 64, 64)
+
+        # Test RGBA
+        rgba_image = create_test_image((4, 128, 128))
+        result = transform(rgba_image)
+        assert result.shape == (4, 64, 64)
+
+    def test_pipeline_consistency(self) -> None:
+        """Test that pipeline produces consistent results."""
+        transform = make_large_scale_jittering(
+            output_size=100,
+            min_scale=0.8,
+            max_scale=1.2,
+        )
+
+        image = create_test_image((3, 150, 150))
+
+        # Apply transform multiple times
+        results = []
+        for i in range(5):
+            random.seed(i)
+            result = transform(image)
+            results.append(result)
+
+        # All results should have correct shape and be valid images
+        for result in results:
+            assert isinstance(result, tv_tensors.Image)
+            assert result.shape == (3, 100, 100)
+            assert result.dtype == torch.uint8
+            assert 0 <= result.min() <= result.max() <= 255
