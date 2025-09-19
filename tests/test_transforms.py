@@ -1,19 +1,16 @@
-"""Tests for transform functionality."""
-
 import logging
 import os
-from pathlib import Path
 import random
+from pathlib import Path
 from typing import Tuple
 
 import pytest
 import torch
 import torchvision
 from torchvision import tv_tensors
-from torchvision.transforms.v2 import InterpolationMode
 from torchvision.transforms.v2 import functional as F
 
-from segpaste.lsj import RandomResize
+from segpaste.lsj import FixedSizeCrop, RandomResize
 
 
 def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:
@@ -31,6 +28,36 @@ def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.
     return F.to_image(image)
 
 
+def create_test_mask(size: Tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
+    """Create a test mask with multiple classes in different regions."""
+    h, w = size
+    mask = torch.zeros(h, w, dtype=torch.uint8)
+
+    # Create multiple class regions
+    for i in range(h):
+        for j in range(w):
+            # Class 0: background (top-left quadrant)
+            if i < h // 2 and j < w // 2:
+                mask[i, j] = 0
+            # Class 1: checkerboard pattern (top-right quadrant)
+            elif i < h // 2 and j >= w // 2:
+                if (i // 16 + j // 16) % 2 == 0:
+                    mask[i, j] = 1
+                else:
+                    mask[i, j] = 2
+            # Class 2: horizontal stripes (bottom-left quadrant)
+            elif i >= h // 2 and j < w // 2:
+                mask[i, j] = 2 if (i // 16) % 2 == 0 else 3
+            # Class 3: diagonal pattern (bottom-right quadrant)
+            else:
+                if (i + j) // 24 % 2 == 0:
+                    mask[i, j] = 3
+                else:
+                    mask[i, j] = 4
+
+    return tv_tensors.Mask(mask)
+
+
 class TestRandomResize:
     """Test cases for RandomResize transform."""
 
@@ -41,14 +68,12 @@ class TestRandomResize:
             max_scale=2.0,
             target_height=256,
             target_width=256,
-            interpolation=InterpolationMode.BILINEAR,
         )
 
         assert transform.min_scale == 0.5
         assert transform.max_scale == 2.0
         assert transform.target_height == 256
         assert transform.target_width == 256
-        assert transform.interpolation == InterpolationMode.BILINEAR
 
     def test_make_params(self) -> None:
         """Test parameter generation."""
@@ -126,32 +151,6 @@ class TestRandomResize:
 
         assert result.shape[1] == expected_size
         assert result.shape[2] == expected_size
-
-    @pytest.mark.parametrize(
-        "interpolation",
-        [
-            InterpolationMode.NEAREST,
-            InterpolationMode.BILINEAR,
-            InterpolationMode.BICUBIC,
-        ],
-    )
-    def test_interpolation_modes(self, interpolation: InterpolationMode) -> None:
-        """Test different interpolation modes."""
-        transform = RandomResize(
-            min_scale=0.5,
-            max_scale=0.5,
-            target_height=64,
-            target_width=64,
-            interpolation=interpolation,
-        )
-
-        image = create_test_image((3, 128, 128))
-        params = {"scale": 0.5}
-        result = transform.transform(image, params)
-
-        # Should work without errors and produce valid output
-        assert isinstance(result, tv_tensors.Image)
-        assert result.shape[0] == 3
 
     def test_edge_cases(self) -> None:
         """Test edge cases and boundary conditions."""
@@ -290,19 +289,6 @@ class TestRandomResize:
             assert isinstance(result, tv_tensors.Image)
             assert result.shape[0] == 3
 
-        # Save comparison if debugging enabled
-        if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
-            os.makedirs("./test_outputs", exist_ok=True)
-            all_images = image + results
-            # Save each image individually since they have different sizes
-            for i, img in enumerate(all_images):
-                name = "original" if i == 0 else f"transformed_{i}"
-                torchvision.utils.save_image(
-                    img,
-                    f"./test_outputs/random_resize_multiple_{name}.png",
-                    normalize=True,
-                )
-
     def test_parameter_validation(self) -> None:
         """Test parameter validation and error handling."""
         # Test that min_scale <= max_scale is expected behavior
@@ -370,3 +356,396 @@ class TestRandomResize:
         rgba_image = create_test_image((4, 128, 128))
         result = transform.transform(rgba_image, params)
         assert result.shape[0] == 4
+
+
+class TestFixedSizeCrop:
+    """Test cases for FixedSizeCrop transform."""
+
+    def test_init(self) -> None:
+        """Test FixedSizeCrop initialization."""
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=128,
+            seg_pad_value=255,
+        )
+
+        assert transform.output_height == 256
+        assert transform.output_width == 256
+        assert transform.img_pad_value == 128
+        assert transform.seg_pad_value == 255
+
+    def test_init_defaults(self) -> None:
+        """Test FixedSizeCrop initialization with default values."""
+        transform = FixedSizeCrop(output_height=128, output_width=128)
+
+        assert transform.output_height == 128
+        assert transform.output_width == 128
+        assert transform.img_pad_value == 0
+        assert transform.seg_pad_value == 255
+
+    def test_get_crop_params_larger_input(self) -> None:
+        """Test crop parameter generation when input is larger than output."""
+        transform = FixedSizeCrop(output_height=128, output_width=128)
+
+        # Input larger than output
+        image = create_test_image((3, 224, 224))
+
+        # Test multiple parameter generations for randomness
+        offsets = []
+        for _ in range(10):
+            params = transform._get_crop_params([image])
+            offset_top = params["offset_top"]
+            offset_left = params["offset_left"]
+
+            # Check bounds
+            assert 0 <= offset_top <= 224 - 128
+            assert 0 <= offset_left <= 224 - 128
+
+            offsets.append((offset_top, offset_left))
+
+        # Should have some variation in random offsets
+        assert len(set(offsets)) > 1 or len(offsets) == 1  # Allow for edge case
+
+    def test_get_crop_params_smaller_input(self) -> None:
+        """Test crop parameter generation when input is smaller than output."""
+        transform = FixedSizeCrop(output_height=256, output_width=256)
+
+        # Input smaller than output
+        image = create_test_image((3, 128, 128))
+
+        params = transform._get_crop_params([image])
+
+        # When input is smaller, offsets should be 0
+        assert params["offset_top"] == 0
+        assert params["offset_left"] == 0
+
+    def test_get_crop_params_exact_size(self) -> None:
+        """Test crop parameter generation when input equals output size."""
+        transform = FixedSizeCrop(output_height=224, output_width=224)
+
+        image = create_test_image((3, 224, 224))
+
+        params = transform._get_crop_params([image])
+
+        # When sizes match exactly, offsets should be 0
+        assert params["offset_top"] == 0
+        assert params["offset_left"] == 0
+
+    def test_get_pad_params(self) -> None:
+        """Test pad parameter generation."""
+        transform = FixedSizeCrop(output_height=256, output_width=256)
+
+        image = create_test_image((3, 128, 128))
+
+        pad_params = transform._get_pad_params([image])
+
+        # Currently returns empty dict - test this behavior
+        assert pad_params == {}
+
+    def test_make_params(self) -> None:
+        """Test parameter creation combining crop and pad params."""
+        transform = FixedSizeCrop(output_height=128, output_width=128)
+
+        image = create_test_image((3, 224, 224))
+
+        params = transform.make_params([image])
+
+        # Should contain crop parameters
+        assert "offset_top" in params
+        assert "offset_left" in params
+        assert isinstance(params["offset_top"], int)
+        assert isinstance(params["offset_left"], int)
+
+    def test_transform_crop_only(self) -> None:
+        """Test transform when only cropping is needed."""
+        transform = FixedSizeCrop(output_height=128, output_width=128)
+
+        # Input larger than output - needs cropping
+        image = create_test_image((3, 224, 224))
+
+        # Use fixed parameters for predictable testing
+        params = {"offset_top": 50, "offset_left": 50}
+        result = transform.transform(image, params)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, 128, 128)
+
+    def test_transform_pad_only(self) -> None:
+        """Test transform when only padding is needed."""
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=128,
+        )
+
+        # Input smaller than output - needs padding
+        image = create_test_image((3, 128, 128))
+
+        params = {"offset_top": 0, "offset_left": 0}
+        result = transform.transform(image, params)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, 256, 256)
+
+        # Check padding values - bottom and right should be padded
+        # The padded area should have the pad value
+        assert torch.all(result[:, 128:, :] == 128)  # Bottom padding
+        assert torch.all(result[:, :, 128:] == 128)  # Right padding
+
+    def test_transform_exact_size(self) -> None:
+        """Test transform when input matches output size exactly."""
+        transform = FixedSizeCrop(output_height=224, output_width=224)
+
+        image = create_test_image((3, 224, 224))
+
+        params = {"offset_top": 0, "offset_left": 0}
+        result = transform.transform(image, params)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, 224, 224)
+        # Should be identical to input
+        assert torch.equal(result, image)
+
+    def test_transform_with_mask(self) -> None:
+        """Test transform with mask tensor type."""
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=128,
+            seg_pad_value=255,
+        )
+
+        # Input smaller than output - needs padding
+        mask = create_test_mask((128, 128))
+
+        params = {"offset_top": 0, "offset_left": 0}
+        result = transform.transform(mask, params)
+
+        assert isinstance(result, tv_tensors.Mask)
+        assert result.shape == (256, 256)
+
+        # Check mask padding values
+        assert torch.all(result[128:, :] == 255)  # Bottom padding
+        assert torch.all(result[:, 128:] == 255)  # Right padding
+
+    def test_transform_with_video(self) -> None:
+        """Test transform with video tensor type."""
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=64,
+        )
+
+        # Create video tensor (T, C, H, W)
+        video_data = torch.randint(0, 255, (8, 3, 128, 128), dtype=torch.uint8)
+        video = tv_tensors.Video(video_data)
+
+        params = {"offset_top": 0, "offset_left": 0}
+        result = transform.transform(video, params)
+
+        assert isinstance(result, tv_tensors.Video)
+        assert result.shape == (8, 3, 256, 256)
+
+        # Check video padding values
+        assert torch.all(result[:, :, 128:, :] == 64)  # Bottom padding
+        assert torch.all(result[:, :, :, 128:] == 64)  # Right padding
+
+    def test_transform_with_regular_tensor(self) -> None:
+        """Test transform with regular PyTorch tensor."""
+        transform = FixedSizeCrop(output_height=64, output_width=64)
+
+        # Regular tensor (not tv_tensor)
+        tensor = torch.rand(3, 128, 128)
+
+        params = {"offset_top": 32, "offset_left": 32}
+        result = transform.transform(tensor, params)
+
+        assert isinstance(result, torch.Tensor)
+        assert result.shape == (3, 64, 64)
+
+    @pytest.mark.parametrize("height,width", [(64, 64), (128, 256), (256, 128)])
+    def test_different_output_sizes(self, height: int, width: int) -> None:
+        """Test transform with different output dimensions."""
+        transform = FixedSizeCrop(output_height=height, output_width=width)
+
+        image = create_test_image((3, 224, 224))
+
+        # Use make_params to get valid parameters
+        params = transform.make_params([image])
+        result = transform.transform(image, params)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, height, width)
+
+    def test_reproducibility(self) -> None:
+        """Test that transform is reproducible with same random seed."""
+        transform = FixedSizeCrop(output_height=128, output_width=128)
+
+        image = create_test_image((3, 224, 224))
+
+        # Set seed and get first result
+        random.seed(42)
+        params1 = transform.make_params([image])
+        result1 = transform.transform(image, params1)
+
+        # Set same seed and get second result
+        random.seed(42)
+        params2 = transform.make_params([image])
+        result2 = transform.transform(image, params2)
+
+        # Results should be identical
+        assert torch.equal(result1, result2)
+        assert params1 == params2
+
+    def test_edge_cases(self) -> None:
+        """Test edge cases and boundary conditions."""
+        transform = FixedSizeCrop(output_height=32, output_width=32)
+
+        # Very small image
+        tiny_image = create_test_image((3, 16, 16))
+        params = transform.make_params([tiny_image])
+        result = transform.transform(tiny_image, params)
+        assert result.shape == (3, 32, 32)
+
+        # Single pixel image
+        single_pixel = create_test_image((3, 1, 1))
+        params = transform.make_params([single_pixel])
+        result = transform.transform(single_pixel, params)
+        assert result.shape == (3, 32, 32)
+
+    def test_mixed_crop_and_pad(self) -> None:
+        """Test transform that needs both cropping and padding."""
+        # This tests an edge case where the implementation might need refinement
+        transform = FixedSizeCrop(
+            output_height=150,
+            output_width=150,
+            img_pad_value=100,
+        )
+
+        # Rectangle image that's taller than wide
+        image = create_test_image((3, 200, 100))  # 200x100
+
+        params = transform.make_params([image])
+        result = transform.transform(image, params)
+
+        assert isinstance(result, tv_tensors.Image)
+        assert result.shape == (3, 150, 150)
+
+    @pytest.mark.parametrize("img_pad_value", [0, 128, 255])
+    @pytest.mark.parametrize("seg_pad_value", [0, 127, 255])
+    def test_different_pad_values(self, img_pad_value: int, seg_pad_value: int) -> None:
+        """Test different padding values."""
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=img_pad_value,
+            seg_pad_value=seg_pad_value,
+        )
+
+        # Test with image
+        image = create_test_image((3, 128, 128))
+        params = {"offset_top": 0, "offset_left": 0}
+        result_img = transform.transform(image, params)
+
+        if img_pad_value != 0:  # Only check if not default background
+            assert torch.all(result_img[:, 128:, :] == img_pad_value)
+            assert torch.all(result_img[:, :, 128:] == img_pad_value)
+
+        # Test with mask
+        mask = create_test_mask((128, 128))
+        result_mask = transform.transform(mask, params)
+
+        assert torch.all(result_mask[128:, :] == seg_pad_value)
+        assert torch.all(result_mask[:, 128:] == seg_pad_value)
+
+    def test_visual_output(self, tmp_path: Path) -> None:
+        """Test visual output and save images for debugging."""
+        if os.environ.get("SAVE_TEST_IMAGES", "0") != "1":
+            pytest.skip("SAVE_TEST_IMAGES not enabled")
+
+        logger = logging.getLogger("test_fixed_size_crop")
+        logger.info(f"Images will be saved to {tmp_path}")
+
+        transform = FixedSizeCrop(
+            output_height=256,
+            output_width=256,
+            img_pad_value=128,
+            seg_pad_value=200,
+        )
+
+        # Create test images of different sizes
+        test_cases = [
+            ("large", create_test_image((3, 400, 400))),  # Needs cropping
+            ("small", create_test_image((3, 128, 128))),  # Needs padding
+            ("wide", create_test_image((3, 200, 400))),  # Mixed case
+            ("tall", create_test_image((3, 400, 200))),  # Mixed case
+        ]
+
+        for name, image in test_cases:
+            # Save original
+            torchvision.utils.save_image(
+                image / 255.0, f"{tmp_path}/fixed_crop_{name}_original.png"
+            )
+
+            # Transform and save result
+            params = transform.make_params([image])
+            result = transform.transform(image, params)
+            torchvision.utils.save_image(
+                result / 255.0, f"{tmp_path}/fixed_crop_{name}_transformed.png"
+            )
+
+        # Test with masks
+        mask = create_test_mask((128, 128))
+        params = {"offset_top": 0, "offset_left": 0}
+        result_mask = transform.transform(mask, params)
+
+        # Save mask as image for visualization
+        mask_as_img = mask.float() * 255
+        result_mask_as_img = result_mask.float() * 255
+
+        torchvision.utils.save_image(
+            mask_as_img / 255.0, f"{tmp_path}/fixed_crop_mask_original.png"
+        )
+        torchvision.utils.save_image(
+            result_mask_as_img / 255.0, f"{tmp_path}/fixed_crop_mask_transformed.png"
+        )
+
+    def test_multiple_transforms_consistency(self) -> None:
+        """Test applying transform multiple times with same parameters."""
+        transform = FixedSizeCrop(output_height=100, output_width=100)
+
+        image = create_test_image((3, 200, 200))
+
+        # Apply same transform multiple times with same parameters
+        params = {"offset_top": 50, "offset_left": 50}
+
+        results = []
+        for _ in range(3):
+            result = transform.transform(image, params)
+            results.append(result)
+
+        # All results should be identical
+        for i in range(1, len(results)):
+            assert torch.equal(results[0], results[i])
+
+    def test_parameter_bounds(self) -> None:
+        """Test parameter generation stays within bounds."""
+        transform = FixedSizeCrop(output_height=64, output_width=64)
+
+        # Test with various input sizes
+        sizes = [(128, 128), (256, 128), (128, 256), (32, 32)]
+
+        for h, w in sizes:
+            image = create_test_image((3, h, w))
+
+            # Generate parameters multiple times
+            for _ in range(10):
+                params = transform._get_crop_params([image])
+
+                # Check bounds
+                max_top = max(0, h - 64)
+                max_left = max(0, w - 64)
+
+                assert 0 <= params["offset_top"] <= max_top
+                assert 0 <= params["offset_left"] <= max_left
