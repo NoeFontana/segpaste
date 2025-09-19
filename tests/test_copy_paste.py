@@ -15,6 +15,7 @@ from torchvision.transforms import v2
 from segpaste.copy_paste import CopyPasteAugmentation
 from segpaste.data_types import CopyPasteConfig, DetectionTarget
 from segpaste.dataset import create_coco_dataset, labels_getter
+from segpaste.lsj import make_large_scale_jittering
 from segpaste.transforms import CopyPasteCollator
 from segpaste.utils import boxes_to_masks
 
@@ -60,8 +61,8 @@ def generate_scale_jitter_transform_strategy() -> v2.Transform:
     return v2.Compose(
         [
             v2.ToImage(),
-            v2.ScaleJitter(target_size=(256, 256)),
             v2.RandomHorizontalFlip(),
+            make_large_scale_jittering(output_size=(256, 256)),
             v2.ClampBoundingBoxes(),
             v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
             v2.ToDtype(torch.float32, scale=True),
@@ -178,7 +179,9 @@ class TestCopyPasteCollator:
             generate_scale_jitter_transform_strategy(),
         ],
     )
-    def test_collator_with_coco_dataset(self, transforms: v2.Transform) -> None:
+    def test_collator_with_coco_dataset(
+        self, transforms: v2.Transform, tmp_path: Path
+    ) -> None:
         """Test CopyPasteCollator with real COCO dataset."""
         # Set random seeds for reproducibility
         torch.manual_seed(42)
@@ -225,12 +228,12 @@ class TestCopyPasteCollator:
             if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
                 torchvision.utils.save_image(
                     [sample["image"] for sample in batch_samples],
-                    f"./data/original_image_{i}.png",
+                    f"{tmp_path}/original_image_{i}.png",
                     nrow=4,
                 )
                 torchvision.utils.save_image(
                     collated_batch["images"],
-                    f"./data/pasted_image_{i}.png",
+                    f"{tmp_path}/pasted_image_{i}.png",
                     nrow=4,
                 )
 
