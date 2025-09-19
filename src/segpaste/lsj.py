@@ -1,9 +1,10 @@
 import random
-from typing import Any
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 from torchvision import tv_tensors
 from torchvision.transforms.v2 import (
+    Compose,
     Transform,
     query_size,
 )
@@ -109,3 +110,46 @@ class FixedSizeCrop(Transform):
                 cropped[..., :, w:] = self.seg_pad_value
 
         return cropped
+
+
+def make_large_scale_jittering(
+    output_size: Union[int, Tuple[int, int]],
+    min_scale: float = 0.1,
+    max_scale: float = 2.0,
+    img_pad_value: Union[float, int] = 0,
+    seg_pad_value: int = 255,
+) -> Transform:
+    """
+    Factory function to create a LargeScaleJittering transform.
+
+    Args:
+        output_size (int or tuple): The desired output size (height, width) of the crop.
+        min_scale (float): The minimum scale factor for resizing.
+        max_scale (float): The maximum scale factor for resizing.
+        img_pad_value (float or int): Fill value for image padding.
+        seg_pad_value (int): Fill value for segmentation mask padding.
+
+    Returns:
+        A Compose transform implementing Large Scale Jittering.
+    """
+    if isinstance(output_size, int):
+        output_size = (output_size, output_size)
+
+    output_height, output_width = output_size
+
+    return Compose(
+        [
+            RandomResize(
+                min_scale=min_scale,
+                max_scale=max_scale,
+                target_height=output_height,
+                target_width=output_width,
+            ),
+            FixedSizeCrop(
+                output_height=output_height,
+                output_width=output_width,
+                img_pad_value=img_pad_value,
+                seg_pad_value=seg_pad_value,
+            ),
+        ]
+    )
