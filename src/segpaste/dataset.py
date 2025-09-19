@@ -35,8 +35,18 @@ class FilteredCocoDetection(CocoDetection):
         return len(self.ids)
 
 
+def labels_getter(
+    sample: tuple[tv_tensors.Image, Dict[str, tv_tensors.TVTensor]],
+) -> tuple[tv_tensors.BoundingBoxes, tv_tensors.Mask, torch.Tensor]:
+    """Extract labels tensor from the sample structure."""
+    target = sample[1]
+
+    # TODO: Handle the case where there are no instances
+    return (target["boxes"], target["masks"], target["labels"])  # pyright: ignore[reportReturnType]
+
+
 def create_coco_dataset(
-    image_folder: str, label_path: str, batch_size: int = 4
+    image_folder: str, label_path: str, transforms: v2.Transform, batch_size: int = 4
 ) -> torch.utils.data.DataLoader:
     """Create COCO dataset and dataloader for testing.
 
@@ -64,31 +74,11 @@ def create_coco_dataset(
             samples.append(sample)
         return samples
 
-    def labels_getter(
-        sample: tuple[tv_tensors.Image, Dict[str, tv_tensors.TVTensor]],
-    ) -> tuple[tv_tensors.BoundingBoxes, tv_tensors.Mask, torch.Tensor]:
-        """Extract labels tensor from the sample structure."""
-        target = sample[1]
-
-        # TODO: Handle the case where there are no instances
-        return (target["boxes"], target["masks"], target["labels"])  # type: ignore
-
     dataset = wrap_dataset_for_transforms_v2(
         FilteredCocoDetection(
             image_folder=image_folder,
             label_path=label_path,
-            transforms=v2.Compose(
-                [
-                    v2.ToImage(),
-                    # # TODO: Get it to work reliably with ScaleJitter
-                    # v2.ScaleJitter(target_size=(256, 256)),
-                    v2.Resize(size=(256, 256)),
-                    v2.RandomHorizontalFlip(),
-                    v2.ClampBoundingBoxes(),
-                    v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
-                    v2.ToDtype(torch.float32, scale=True),
-                ]
-            ),
+            transforms=transforms,
         ),
         target_keys=["image_id", "boxes", "labels", "masks"],
     )
