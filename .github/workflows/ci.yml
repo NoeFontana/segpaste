@@ -32,8 +32,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv python use ${{ matrix.python-version }}
-          uv sync
+          uv sync --python ${{ matrix.python-version }}
 
       - name: Format
         # Use `uv run` to execute commands from the virtual environment
