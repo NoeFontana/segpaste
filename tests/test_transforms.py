@@ -74,8 +74,12 @@ def create_detection_target(
     # Create random boxes
     boxes = torch.rand(num_objects, 4) * torch.tensor([w, h, w, h])
     # Ensure boxes are valid (x1 < x2, y1 < y2)
-    boxes[:, 2] = torch.clamp(boxes[:, 2], boxes[:, 0] + 10, w)
-    boxes[:, 3] = torch.clamp(boxes[:, 3], boxes[:, 1] + 10, h)
+    boxes[:, 2] = torch.clamp(
+        boxes[:, 2], boxes[:, 0] + torch.tensor(10), torch.tensor(w)
+    )
+    boxes[:, 3] = torch.clamp(
+        boxes[:, 3], boxes[:, 1] + torch.tensor(10), torch.tensor(h)
+    )
 
     # Create random labels
     labels = torch.randint(1, 6, (num_objects,))

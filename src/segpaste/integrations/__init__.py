@@ -2,12 +2,12 @@
 
 from segpaste.integrations.coco import (
     FilteredCocoDetection,
-    create_coco_dataset,
+    create_coco_dataloader,
     labels_getter,
 )
 
 __all__ = [
     "FilteredCocoDetection",
-    "create_coco_dataset",
+    "create_coco_dataloader",
     "labels_getter",
 ]
