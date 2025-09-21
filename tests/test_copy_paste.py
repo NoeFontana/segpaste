@@ -18,7 +18,7 @@ from segpaste.augmentation import (
     make_large_scale_jittering,
 )
 from segpaste.config import CopyPasteConfig
-from segpaste.integrations import create_coco_dataset, labels_getter
+from segpaste.integrations import create_coco_dataloader, labels_getter
 from segpaste.processing import boxes_to_masks
 from segpaste.types import DetectionTarget
 
@@ -202,7 +202,7 @@ class TestCopyPasteCollator:
         if not (os.path.exists(val_images_path) and os.path.exists(annotations_path)):
             pytest.skip(f"COCO dataset not found at {dataset_path}")
 
-        dataloader: torch.utils.data.DataLoader = create_coco_dataset(
+        dataloader = create_coco_dataloader(
             image_folder=val_images_path,
             label_path=annotations_path,
             transforms=transforms,

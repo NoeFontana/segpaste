@@ -45,9 +45,9 @@ def labels_getter(
     return (target["boxes"], target["masks"], target["labels"])  # pyright: ignore[reportReturnType]
 
 
-def create_coco_dataset(
+def create_coco_dataloader(
     image_folder: str, label_path: str, transforms: v2.Transform, batch_size: int = 4
-) -> torch.utils.data.DataLoader:  # type: ignore[type-arg]
+) -> torch.utils.data.DataLoader[tuple[Any, Any]]:
     """Create COCO dataset and dataloader for testing.
 
     Args:
