@@ -1,0 +1,48 @@
+# .github/workflows/ci.yml
+
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Set up uv and cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: uv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+
+      - name: Install dependencies
+        run: |
+          uv python use ${{ matrix.python-version }}
+          uv sync
+
+      - name: Format
+        # Use `uv run` to execute commands from the virtual environment
+        run: uv run ruff format --check .
+
+      - name: Lint
+        # Use `uv run` to execute commands from the virtual environment
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy .
+
+      - name: Test with pytest
+        run: uv run pytest
