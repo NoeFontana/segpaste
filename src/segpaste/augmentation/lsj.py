@@ -8,6 +8,9 @@ from torchvision.transforms.v2 import (
     Transform,
     query_size,
 )
+from torchvision.transforms.v2 import (
+    SanitizeBoundingBoxes as tv_SanitizeBoundingBoxes,
+)
 from torchvision.transforms.v2 import functional as F
 
 
@@ -110,6 +113,27 @@ class FixedSizeCrop(Transform):  # type: ignore[misc]
                 cropped[..., :, w:] = self.seg_pad_value
 
         return cropped
+
+
+class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):
+    def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
+        """Unlike torchvision v0.23, we only sanitize the configured labels."""
+        is_label = params["labels"] is not None and any(
+            inpt is label for label in params["labels"]
+        )
+        is_bounding_boxes_or_mask = isinstance(
+            inpt, (tv_tensors.BoundingBoxes, tv_tensors.Mask)
+        )
+
+        # Unlike torchvision v0.23, we only sanitize the configured labels.
+        if not (is_label and is_bounding_boxes_or_mask):
+            return inpt
+        output = inpt[params["valid"]]
+
+        if is_label:
+            return output
+        else:
+            return tv_tensors.wrap(output, like=inpt)
 
 
 def make_large_scale_jittering(
