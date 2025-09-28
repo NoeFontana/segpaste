@@ -15,12 +15,15 @@ from torchvision.transforms import v2
 from segpaste.augmentation import (
     CopyPasteAugmentation,
     CopyPasteCollator,
-    make_large_scale_jittering,
 )
 from segpaste.config import CopyPasteConfig
-from segpaste.integrations import create_coco_dataloader, labels_getter
+from segpaste.integrations import create_coco_dataloader
 from segpaste.processing import boxes_to_masks
 from segpaste.types import DetectionTarget
+from tests.shared import (
+    generate_resize_transform_strategy,
+    generate_scale_jitter_transform_strategy,
+)
 
 
 def create_sample_detection_target(
@@ -45,32 +48,6 @@ def create_sample_detection_target(
         masks[i, y1:y2, x1:x2] = 1.0
 
     return DetectionTarget(image=image, boxes=boxes, labels=labels, masks=masks)
-
-
-def generate_resize_transform_strategy() -> v2.Transform:
-    return v2.Compose(
-        [
-            v2.ToImage(),
-            v2.Resize(size=(256, 256)),
-            v2.RandomHorizontalFlip(),
-            v2.ClampBoundingBoxes(),
-            v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
-            v2.ToDtype(torch.float32, scale=True),
-        ]
-    )
-
-
-def generate_scale_jitter_transform_strategy() -> v2.Transform:
-    return v2.Compose(
-        [
-            v2.ToImage(),
-            v2.RandomHorizontalFlip(),
-            make_large_scale_jittering(output_size=(256, 256)),
-            v2.ClampBoundingBoxes(),
-            v2.SanitizeBoundingBoxes(labels_getter=labels_getter),
-            v2.ToDtype(torch.float32, scale=True),
-        ]
-    )
 
 
 class TestCopyPasteAugmentation:
