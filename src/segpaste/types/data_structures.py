@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from torchvision.tv_tensors import Mask
+
 from segpaste.compile_util import skip_if_compiling
 from segpaste.types.type_aliases import (
     BoxesTensor,
@@ -27,6 +29,16 @@ class BoundingBox:
             raise ValueError("x1 must be < x2")
         if self.y1 >= self.y2:
             raise ValueError("y1 must be < y2")
+
+
+class PaddingMask(Mask):  # type: ignore[misc]
+    """Unlike tv_tensor.Mask, PaddingMask is not associated with any object.
+
+    It is used to indicate padded parts of an Image. Unlike tv_tensor.Mask, it is
+    is forwarded unchanged by this package reimplementation SanitizeBoundingBoxes.
+    """
+
+    pass
 
 
 @dataclass(slots=True)  # Not frozen since it may be modified during augmentation
