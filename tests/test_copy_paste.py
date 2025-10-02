@@ -1,6 +1,7 @@
 """Tests for copy-paste augmentation functionality."""
 
 import itertools
+import logging
 import os
 import random
 from pathlib import Path
@@ -178,6 +179,9 @@ class TestCopyPasteCollator:
 
         if not (os.path.exists(val_images_path) and os.path.exists(annotations_path)):
             pytest.skip(f"COCO dataset not found at {dataset_path}")
+
+        if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
+            logging.getLogger().info(f"Images will be saved to {tmp_path}")
 
         dataloader = create_coco_dataloader(
             image_folder=val_images_path,
