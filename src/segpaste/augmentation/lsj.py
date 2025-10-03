@@ -13,6 +13,8 @@ from torchvision.transforms.v2 import (
 )
 from torchvision.transforms.v2 import functional as F
 
+from segpaste.types.data_structures import PaddingMask
+
 
 class RandomResize(Transform):  # type: ignore[misc]
     def __init__(
@@ -117,23 +119,22 @@ class FixedSizeCrop(Transform):  # type: ignore[misc]
 
 class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):
     def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
-        """Unlike torchvision v0.23, we only sanitize the configured labels."""
+        """Unlike the original SanitizeBoundingBoxes, this transform can also handle
+        PaddingMask and will forward them unchanged."""
+
         is_label = params["labels"] is not None and any(
             inpt is label for label in params["labels"]
         )
+        if is_label:
+            return inpt[params["valid"]]
+
         is_bounding_boxes_or_mask = isinstance(
             inpt, (tv_tensors.BoundingBoxes, tv_tensors.Mask)
-        )
-
-        # Unlike torchvision v0.23, we only sanitize the configured labels.
-        if not (is_label and is_bounding_boxes_or_mask):
+        ) and not isinstance(inpt, PaddingMask)
+        if not is_bounding_boxes_or_mask:
             return inpt
-        output = inpt[params["valid"]]
 
-        if is_label:
-            return output
-        else:
-            return tv_tensors.wrap(output, like=inpt)
+        return tv_tensors.wrap(inpt[params["valid"]], like=inpt)
 
 
 def make_large_scale_jittering(
