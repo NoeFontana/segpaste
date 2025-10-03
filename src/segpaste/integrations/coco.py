@@ -1,38 +1,155 @@
-import logging
+import os
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
+from faster_coco_eval import COCO
+from faster_coco_eval import mask as coco_mask
+from PIL import Image
 from torchvision import tv_tensors
-from torchvision.datasets import CocoDetection
+from torchvision.datasets import VisionDataset
 from torchvision.transforms import v2
-from torchvision.tv_tensors._dataset_wrapper import wrap_dataset_for_transforms_v2
+from torchvision.transforms.v2 import functional as F
+
+from segpaste.types.data_structures import PaddingMask
 
 
-class FilteredCocoDetection(CocoDetection):  # type: ignore[misc]
+def segmentation_to_mask(
+    segmentation: Any, canvas_size: tuple[int, int]
+) -> torch.Tensor:
+    """Convert COCO segmentation to binary mask.
+
+    Args:
+        segmentation (ValidRleType): COCO segmentation (RLE or polygon format).
+        canvas_size (tuple[int, int]): Size of the canvas (height, width).
+
+    Returns:
+        torch.Tensor: Binary mask tensor.
+    """
+    # TODO: Clean that up
+    if not isinstance(segmentation, (dict, list)):
+        raise ValueError(
+            f"COCO segmentation expected to be dict or list, got {type(segmentation)}"
+        )
+
+    h, w = canvas_size
+    if isinstance(segmentation, dict):
+        # if counts is a string, it is already an encoded RLE mask
+        if not isinstance(segmentation["counts"], str):
+            segmentation = coco_mask.frPyObjects(segmentation, h, w)
+    elif isinstance(segmentation, list):
+        segmentation = coco_mask.merge(coco_mask.frPyObjects(segmentation, h, w))  # pyright: ignore[reportArgumentType]
+    return torch.from_numpy(coco_mask.decode(segmentation))
+
+
+class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
     def __init__(
         self,
         image_folder: str,
         label_path: str,
         transforms: Callable | None = None,  # type: ignore[type-arg]
+        target_keys: list[str] | None = None,
     ):
-        # First, initialize the parent class
-        super().__init__(root=image_folder, annFile=label_path, transforms=transforms)
+        super().__init__(root=image_folder, transforms=transforms)
 
-        # Get the original list of all image IDs
-        all_ids = self.coco.getImgIds()
+        self.label_path = label_path
+        self.coco = COCO(label_path)
 
         # Filter the list, keeping only IDs that have annotations
-        self.ids = [
-            img_id for img_id in all_ids if len(self.coco.getAnnIds(imgIds=img_id)) > 0
-        ]
-        logger = logging.getLogger(__name__)
-        logger.info(
-            f"Original number of images: {len(all_ids)}. "
-            f"Number of images with annotations: {len(self.ids)}"
+        self.valid_img_ids = sorted(
+            img_id
+            for img_id in self.coco.get_img_ids()
+            if len(self.coco.get_ann_ids([img_id])) > 0
         )
 
+        if target_keys is None:
+            target_keys = ["image_id", "padding_mask", "boxes", "labels", "masks"]
+        self.target_keys = target_keys
+
     def __len__(self) -> int:
-        return len(self.ids)
+        return len(self.valid_img_ids)
+
+    def _load_image(self, id: int) -> Image.Image:
+        path = self.coco.loadImgs(id)[0]["file_name"]
+        return Image.open(os.path.join(self.root, path)).convert("RGB")
+
+    def _load_target(self, id: int) -> list[dict[str, Any]]:
+        target: list[dict[str, Any]] = self.coco.loadAnns(self.coco.getAnnIds([id]))
+        return target
+
+    def __getitem__(self, index: int) -> tuple[Any, Any]:
+        if not isinstance(index, int):
+            raise ValueError(
+                f"Index must be of type integer, got {type(index)} instead."
+            )
+
+        image_id = self.valid_img_ids[index]
+        image = self._load_image(image_id)
+        target_list = self._load_target(image_id)
+
+        canvas_size = (image.height, image.width)
+
+        # Convert list of annotation dicts to the format expected by transforms v2
+        if not target_list:
+            # Handle empty targets
+            target = {
+                "image_id": image_id,
+                "boxes": tv_tensors.BoundingBoxes(
+                    torch.zeros((0, 4)),
+                    format=tv_tensors.BoundingBoxFormat.XYXY,
+                    canvas_size=canvas_size,
+                    dtype=torch.float32,
+                ),  # pyright: ignore[reportCallIssue]
+                "labels": torch.zeros(0, dtype=torch.long),
+                "masks": tv_tensors.Mask(
+                    torch.zeros((0, *canvas_size), dtype=torch.uint8)
+                ),
+            }
+        else:
+            # Extract bounding boxes and convert from XYWH to XYXY
+            boxes = torch.tensor(
+                [ann["bbox"] for ann in target_list], dtype=torch.float32
+            )
+            boxes = F.convert_bounding_box_format(
+                tv_tensors.BoundingBoxes(
+                    data=boxes,
+                    format=tv_tensors.BoundingBoxFormat.XYWH,
+                    canvas_size=canvas_size,
+                ),  # pyright: ignore[reportCallIssue]
+                new_format=tv_tensors.BoundingBoxFormat.XYXY,
+            )
+
+            # Extract labels
+            labels = torch.tensor(
+                [ann["category_id"] for ann in target_list], dtype=torch.long
+            )
+            target = {
+                "image_id": image_id,
+                "boxes": boxes,
+                "labels": labels,
+            }
+            # Convert segmentations to masks if available
+            if "masks" in self.target_keys:
+                masks = []
+                for ann in target_list:
+                    segmentation = ann["segmentation"]
+                    mask = segmentation_to_mask(
+                        segmentation=segmentation, canvas_size=canvas_size
+                    )
+                    masks.append(mask)
+
+                masks_tensor = tv_tensors.Mask(torch.stack(masks))
+                target["masks"] = masks_tensor
+
+        if "padding_mask" in self.target_keys:
+            # 1xHxW mask of ones, since all pixels are valid at this point
+            target["padding_mask"] = PaddingMask(
+                torch.zeros((1, *canvas_size), dtype=torch.bool)
+            )
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, target)
+
+        return image, target
 
 
 def labels_getter(
@@ -74,17 +191,14 @@ def create_coco_dataloader(
             samples.append(sample)
         return samples
 
-    dataset = wrap_dataset_for_transforms_v2(
-        FilteredCocoDetection(
-            image_folder=image_folder,
-            label_path=label_path,
-            transforms=transforms,
-        ),
-        target_keys=["image_id", "boxes", "labels", "masks"],
+    dataset = CocoDetectionV2(
+        image_folder=image_folder,
+        label_path=label_path,
+        transforms=transforms,
     )
 
     return torch.utils.data.DataLoader(
-        dataset,  # pyright: ignore[reportArgumentType]
+        dataset,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=coco_collate_fn,
