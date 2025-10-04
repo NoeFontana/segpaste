@@ -195,7 +195,10 @@ class TestCocoDetectionV2:
         image_dir, ann_path = temp_coco_data
 
         # Mock segmentation_to_mask to return dummy masks
-        def mock_seg_fn(_: Any, canvas_size: Tuple[int, int]) -> torch.Tensor:
+        def mock_seg_fn(
+            segmentation: Any,  # noqa: ARG001
+            canvas_size: Tuple[int, int],
+        ) -> torch.Tensor:
             return torch.ones(canvas_size[0], canvas_size[1], dtype=torch.uint8)
 
         mock_seg_to_mask.side_effect = mock_seg_fn
