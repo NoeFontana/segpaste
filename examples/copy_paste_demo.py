@@ -5,7 +5,7 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Any, List
+from typing import List
 
 import torch
 from torchvision.transforms import v2
@@ -14,17 +14,6 @@ from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.config import CopyPasteConfig
 from segpaste.integrations import create_coco_dataloader
 from segpaste.types import DetectionTarget
-
-
-def convert_sample_to_detection_target(sample: dict[str, Any]) -> DetectionTarget:
-    """Convert COCO sample to DetectionTarget format."""
-    return DetectionTarget(
-        image=sample["image"],
-        boxes=sample["boxes"],
-        labels=sample["labels"],
-        masks=sample["masks"],
-        padding_mask=sample.get("padding_mask"),
-    )
 
 
 def demonstrate_copy_paste_augmentation() -> None:
@@ -39,7 +28,7 @@ def demonstrate_copy_paste_augmentation() -> None:
     if not (os.path.exists(val_images_path) and os.path.exists(annotations_path)):
         logging.getLogger().warning(
             f"COCO dataset not found at {dataset_path}. "
-            "Please set COCO_DATASET_PATH environment variable or download COCO dataset."
+            "Please set COCO_DATASET_PATH environment variable."
         )
         return
 
@@ -88,7 +77,7 @@ def demonstrate_copy_paste_augmentation() -> None:
     detection_targets = []
     for sample in samples:
         try:
-            target = convert_sample_to_detection_target(sample)
+            target = DetectionTarget.from_dict(sample)
             detection_targets.append(target)
         except Exception as e:
             logging.getLogger().warning(f"Failed to convert sample: {e}")
@@ -128,7 +117,7 @@ def demonstrate_copy_paste_augmentation() -> None:
 
     # Optionally save images for visual inspection
     if os.environ.get("SAVE_DEMO_IMAGES", "0") == "1":
-        save_demo_images(detection_targets[:3], augmented_samples[:3])
+        save_demo_images(detection_targets[: len(augmented_samples)], augmented_samples)
 
 
 def save_demo_images(
