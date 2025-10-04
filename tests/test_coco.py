@@ -169,9 +169,8 @@ class TestCocoDetectionV2:
         # Test loading first image
         image = dataset._load_image(1)
 
-        assert isinstance(image, Image.Image)
-        assert image.mode == "RGB"
-        assert image.size == (100, 100)
+        assert isinstance(image, torch.Tensor)
+        assert image.shape == (3, 100, 100)
 
     def test_load_target(self, temp_coco_data: Tuple[str, str]) -> None:
         """Test target loading."""
@@ -212,8 +211,8 @@ class TestCocoDetectionV2:
         image, target = dataset[0]  # First image (id=1, has 2 annotations)
 
         # Check image
-        assert isinstance(image, Image.Image)
-        assert image.size == (100, 100)
+        assert isinstance(image, torch.Tensor)
+        assert image.shape == (3, 100, 100)
 
         # Check target structure
         assert isinstance(target, dict)

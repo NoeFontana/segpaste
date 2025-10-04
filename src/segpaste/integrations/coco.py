@@ -165,34 +165,44 @@ def labels_getter(
     return (target["boxes"], target["masks"], target["labels"])  # pyright: ignore[reportReturnType]
 
 
+def add_image_collate_fn(
+    batch: List[Tuple[tv_tensors.Image, Dict[str, Any]]],
+) -> List[Dict[str, torch.Tensor]]:
+    """Custom collate function to convert COCO annotations to expected format.
+
+    Converts a batch of (image, target) into a list of dictionaries
+        containing the 'image' and all target keys.
+    """
+    samples: List[Dict[str, torch.Tensor]] = []
+
+    for image, targets in batch:
+        sample = targets.copy()
+        sample.update(
+            {
+                "image": image,
+            }
+        )
+        samples.append(sample)
+    return samples
+
+
 def create_coco_dataloader(
-    image_folder: str, label_path: str, transforms: v2.Transform, batch_size: int = 4
+    image_folder: str,
+    label_path: str,
+    transforms: v2.Transform,
+    batch_size: int = 4,
+    collate_fn: Any = add_image_collate_fn,
 ) -> torch.utils.data.DataLoader[tuple[Any, Any]]:
     """Create COCO dataset and dataloader for testing.
 
     Args:
         dataset_path: Path to COCO dataset directory
         batch_size: Batch size for dataloader
+        collate_fn: Collate function for dataloader
 
     Returns:
         DataLoader for COCO dataset
     """
-
-    def coco_collate_fn(
-        batch: List[Tuple[tv_tensors.Image, Dict[str, Any]]],
-    ) -> List[Dict[str, torch.Tensor]]:
-        """Custom collate function to convert COCO annotations to expected format."""
-        samples: List[Dict[str, torch.Tensor]] = []
-
-        for image, targets in batch:
-            sample = targets.copy()
-            sample.update(
-                {
-                    "image": image,
-                }
-            )
-            samples.append(sample)
-        return samples
 
     dataset = CocoDetectionV2(
         image_folder=image_folder,
@@ -204,5 +214,5 @@ def create_coco_dataloader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=coco_collate_fn,
+        collate_fn=collate_fn,
     )

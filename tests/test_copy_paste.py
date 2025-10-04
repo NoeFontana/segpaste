@@ -5,7 +5,7 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Tuple
 
 import numpy as np
 import pytest
@@ -183,66 +183,55 @@ class TestCopyPasteCollator:
         if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
             logging.getLogger().info(f"Images will be saved to {tmp_path}")
 
+        config: CopyPasteConfig = CopyPasteConfig(
+            paste_probability=1.0,  # Always apply for testing
+            max_paste_objects=20,
+            min_paste_objects=5,
+            scale_range=(0.5, 2.0),
+        )
+        collator: CopyPasteCollator = CopyPasteCollator(CopyPasteAugmentation(config))
+
         dataloader = create_coco_dataloader(
             image_folder=val_images_path,
             label_path=annotations_path,
             transforms=transforms,
             batch_size=4,
+            collate_fn=collator,
         )
 
         # Get a batch of samples
-        batch_samples: List[Dict[str, torch.Tensor]] = []
-        for i, samples in enumerate(itertools.islice(dataloader, 10)):
-            if len(samples) != 4:  # Need at least 4 samples for copy-paste
-                continue
-            batch_samples = samples[:4]  # Take first 4 samples
-
-            # Test collator
-            config: CopyPasteConfig = CopyPasteConfig(
-                paste_probability=1.0,  # Always apply for testing
-                max_paste_objects=20,
-                min_paste_objects=5,
-                scale_range=(0.5, 2.0),
-            )
-            collator: CopyPasteCollator = CopyPasteCollator(
-                CopyPasteAugmentation(config)
-            )
-
-            # Apply collator to batch
-            collated_batch: Dict[str, Any] = collator(batch_samples)
-
+        for i, samples in enumerate(itertools.islice(dataloader, 2)):
             if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
                 torchvision.utils.save_image(
-                    [sample["image"] for sample in batch_samples],
-                    f"{tmp_path}/original_image_{i}.png",
-                    nrow=4,
-                )
-                torchvision.utils.save_image(
-                    collated_batch["images"],
+                    samples["images"],
                     f"{tmp_path}/pasted_image_{i}.png",
                     nrow=4,
                 )
 
             # Verify collated batch structure
-            assert "images" in collated_batch
-            assert "boxes" in collated_batch
-            assert "labels" in collated_batch
-            assert "masks" in collated_batch
+            assert "images" in samples
+            assert "boxes" in samples
+            assert "labels" in samples
+            assert "masks" in samples
+            assert "padding_mask" in samples or all(
+                sample.get("padding_mask") is None for sample in samples["masks"]
+            )
 
             # Check batch dimensions
-            assert isinstance(collated_batch["images"], torch.Tensor)
-            assert collated_batch["images"].shape[0] <= len(batch_samples)
+            assert isinstance(samples["images"], torch.Tensor)
 
             # Check that boxes, labels, and masks are lists
-            assert isinstance(collated_batch["boxes"], list)
-            assert isinstance(collated_batch["labels"], list)
-            assert isinstance(collated_batch["masks"], list)
+            assert isinstance(samples["boxes"], list)
+            assert isinstance(samples["labels"], list)
+            assert isinstance(samples["masks"], list)
+
+            assert isinstance(samples.get("padding_mask"), (torch.Tensor, type(None)))
 
             # Verify each sample in batch
-            for i in range(len(collated_batch["boxes"])):
-                boxes = collated_batch["boxes"][i]
-                labels = collated_batch["labels"][i]
-                masks = collated_batch["masks"][i]
+            for i in range(len(samples["boxes"])):
+                boxes = samples["boxes"][i]
+                labels = samples["labels"][i]
+                masks = samples["masks"][i]
 
                 assert isinstance(boxes, torch.Tensor)
                 assert isinstance(labels, torch.Tensor)

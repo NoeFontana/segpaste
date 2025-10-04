@@ -37,7 +37,13 @@ from segpaste import CopyPasteAugmentation, CopyPasteCollator, CopyPasteConfig
 
 config = CopyPasteConfig()
 augmentation = CopyPasteAugmentation(config)
-collator = CopyPasteCollator(augmentation)
+collate_fn = CopyPasteCollator(augmentation)
+torch.utils.data.DataLoader(
+        dataset, # Your dataset here
+        batch_size=batch_size, # Must be > 1
+        collate_fn=collate_fn,
+    )
+
 ```
 
 Examples of usage can be found in the test suite.
