@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 from unittest.mock import patch
 
 import pytest
@@ -189,14 +189,13 @@ class TestCocoDetectionV2:
 
     @patch("segpaste.integrations.coco.segmentation_to_mask")
     def test_getitem_with_masks(
-        self, mock_seg_to_mask, temp_coco_data: Tuple[str, str]
+        self, mock_seg_to_mask: Any, temp_coco_data: Tuple[str, str]
     ) -> None:
         """Test __getitem__ with masks enabled."""
         image_dir, ann_path = temp_coco_data
 
         # Mock segmentation_to_mask to return dummy masks
-        # pylint: disable=unused-argument
-        def mock_seg_fn(segmentation, canvas_size):
+        def mock_seg_fn(_: Any, canvas_size: Tuple[int, int]) -> torch.Tensor:
             return torch.ones(canvas_size[0], canvas_size[1], dtype=torch.uint8)
 
         mock_seg_to_mask.side_effect = mock_seg_fn
@@ -378,8 +377,8 @@ class TestCocoDetectionV2:
         boxes = target["boxes"]
         assert isinstance(boxes, tv_tensors.BoundingBoxes)
 
-        # First box should be converted from [10, 10, 30, 30] XYWH to [10, 10, 40, 40] XYXY
-        # Second box should be converted from [50, 50, 20, 20] XYWH to [50, 50, 70, 70] XYXY
+        # First box should be converted from [10, 10, 30, 30] XYWH to [10, 10, 40, 40]
+        # Second box should be converted from [50, 50, 20, 20] XYWH to [50, 50, 70, 70]
         expected_boxes = torch.tensor(
             [[10, 10, 40, 40], [50, 50, 70, 70]], dtype=torch.float32
         )
