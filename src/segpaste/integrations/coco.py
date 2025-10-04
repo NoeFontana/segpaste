@@ -89,7 +89,7 @@ class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
         image = self._load_image(image_id)
         target_list = self._load_target(image_id)
 
-        canvas_size = image.shape[-2:]  # (H, W)
+        canvas_size = image.shape[-2], image.shape[-1]  # (H, W)
 
         # Convert list of annotation dicts to the format expected by transforms v2
         if not target_list:
