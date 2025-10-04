@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Union
 import torch
 
 from segpaste.augmentation import CopyPasteAugmentation
-from segpaste.config import CopyPasteConfig
 from segpaste.types import DetectionTarget
 
 
@@ -77,13 +76,13 @@ class CopyPasteCollator:
     as source objects for pasting.
     """
 
-    def __init__(self, config: CopyPasteConfig) -> None:
+    def __init__(self, augmentation: CopyPasteAugmentation) -> None:
         """Initialize copy-paste collator.
 
         Args:
-            config: Configuration for copy-paste augmentation
+            augmentation: Copy-paste augmentation instance
         """
-        self.copy_paste: CopyPasteAugmentation = CopyPasteAugmentation(config)
+        self.copy_paste: CopyPasteAugmentation = augmentation
 
     def __call__(
         self, batch: List[Dict[str, Any]]
