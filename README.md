@@ -80,12 +80,11 @@ Contributions are welcome. Please open an issue to discuss major changes or subm
 If you use this implementation in your research, please consider citing the original paper:
 
 ```bibtex
-@inproceedings{ghiasi2021simple,
-  title={Simple copy-paste is a strong data augmentation method for instance segmentation},
+@article{ghiasi2020simple,
+  title={Simple Copy-Paste is a Strong Data Augmentation Method for Instance Segmentation},
   author={Ghiasi, Golnaz and Cui, Yin and Srinivas, Aravind and Qian, Rui and Lin, Tsung-Yi and Cubuk, Ekin D and Le, Quoc V and Zoph, Barret},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  pages={2881--2890},
-  year={2021}
+  journal={arXiv preprint arXiv:2012.07177},
+  year={2020}
 }
 ```
 
