@@ -4,7 +4,7 @@ This module contains all data structures and configuration types used
 throughout the package.
 """
 
-from segpaste.types.data_structures import BoundingBox, DetectionTarget
+from segpaste.types.data_structures import BoundingBox, DetectionTarget, PaddingMask
 from segpaste.types.type_aliases import (
     BoxesTensor,
     ImageTensor,
@@ -15,6 +15,7 @@ from segpaste.types.type_aliases import (
 __all__ = [
     "BoundingBox",
     "DetectionTarget",
+    "PaddingMask",
     "ImageTensor",
     "BoxesTensor",
     "MasksTensor",
