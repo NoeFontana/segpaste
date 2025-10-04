@@ -4,17 +4,13 @@ import random
 from typing import List, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
 from torchvision.ops import masks_to_boxes
 
 from segpaste.config import CopyPasteConfig
 from segpaste.processing import (
-    blend_with_mode,
-    check_collision,
     compute_mask_area,
-    create_smooth_mask_border,
-    get_random_placement,
 )
+from segpaste.processing.placement import PlacementResult, create_object_placer
 from segpaste.types import DetectionTarget
 
 
@@ -39,20 +35,8 @@ class CopyPasteAugmentation:
         target_data: DetectionTarget,
         source_objects: List[DetectionTarget],
     ) -> DetectionTarget:
-        """Apply copy-paste augmentation to target image.
-
-        Args:
-            target_data: Target image and annotations
-            source_objects: List of source objects to potentially paste
-
-        Returns:
-            Augmented target data
-        """
-        # Check if we should apply copy-paste
-        if not source_objects or target_data.masks is None:
-            return target_data
-
-        if random.random() > self.config.paste_probability:
+        """Apply copy-paste augmentation to target image."""
+        if not self._should_apply_augmentation(target_data, source_objects):
             return target_data
 
         selected_objects = self._select_objects_to_paste(source_objects)
@@ -61,112 +45,158 @@ class CopyPasteAugmentation:
 
         return self._apply_copy_paste(target_data, selected_objects)
 
+    def _should_apply_augmentation(
+        self, target_data: DetectionTarget, source_objects: List[DetectionTarget]
+    ) -> bool:
+        """Check if augmentation should be applied."""
+        return (
+            len(source_objects) > 0
+            and target_data.masks is not None
+            and random.random() <= self.config.paste_probability
+        )
+
     def _select_objects_to_paste(
         self, source_objects: List[DetectionTarget]
     ) -> List[DetectionTarget]:
-        """Select objects to paste from source objects.
-
-        Args:
-            source_objects: List of available source objects
-
-        Returns:
-            List of selected objects to paste
-        """
+        """Select random objects to paste."""
         if not source_objects:
             return []
 
-        max_objects = min(self.config.max_paste_objects, len(source_objects))
-        min_objects = min(self.config.min_paste_objects, max_objects)
-        num_to_paste = random.randint(min_objects, max_objects)
+        num_available = len(source_objects)
+        max_paste = min(self.config.max_paste_objects, num_available)
+        min_paste = min(self.config.min_paste_objects, max_paste)
 
-        selected = random.sample(source_objects, num_to_paste)
-
-        return selected
+        num_to_paste = random.randint(min_paste, max_paste)
+        return random.sample(source_objects, num_to_paste)
 
     def _apply_copy_paste(
         self, target_data: DetectionTarget, paste_objects: List[DetectionTarget]
     ) -> DetectionTarget:
-        """Apply copy-paste augmentation to target image.
-
-        Args:
-            target_data: Target image and annotations
-            paste_objects: Objects to paste
-
-        Returns:
-            Augmented target data
-        """
-        # Work with copies
-        image = target_data.image.clone()
-        boxes = target_data.boxes.clone()
-        labels = target_data.labels.clone()
-        masks = target_data.masks.clone() if target_data.masks is not None else None
-
-        if masks is None:
+        """Apply copy-paste augmentation to target image."""
+        if target_data.masks is None:
             return target_data
 
-        _, img_height, img_width = image.shape
+        # Paste objects and collect results
+        pasted_results = self._paste_all_objects(
+            target_data.image.clone(),
+            target_data.padding_mask,
+            paste_objects,
+        )
 
-        # Keep track of pasted boxes for collision detection
-        pasted_boxes: list[torch.Tensor] = []
-        pasted_masks_list: list[torch.Tensor] = []
-        pasted_labels_list: list[torch.Tensor] = []
+        if not pasted_results:
+            return target_data
 
-        for obj in paste_objects:
-            if obj.masks is None or obj.masks.numel() == 0:
-                continue
+        # Update annotations with pasted objects
+        return self._update_annotations(target_data, pasted_results)
 
-            # Process each object in the source (could be multiple objects)
-            for obj_idx in range(obj.masks.shape[0]):
-                obj_mask = obj.masks[obj_idx : obj_idx + 1]  # Keep batch dim
-                obj_box = obj.boxes[obj_idx : obj_idx + 1]
-                obj_label = obj.labels[obj_idx : obj_idx + 1]
-                obj_img = obj.image
+    def _paste_all_objects(
+        self,
+        image: torch.Tensor,
+        padding_mask: Optional[torch.Tensor],
+        paste_objects: List[DetectionTarget],
+    ) -> List[PlacementResult]:
+        """Paste all objects onto the image and return successful placements."""
+        pasted_results: List[PlacementResult] = []
+        pasted_boxes: List[torch.Tensor] = []
 
-                # Try to place the object
-                placed_data = self._place_object(
-                    image,
-                    obj_img,
-                    obj_mask,
-                    obj_box,
-                    obj_label,
-                    (img_height, img_width),
-                    pasted_boxes,
-                )
-
-                if placed_data is not None:
-                    placed_img, placed_mask, placed_box, placed_label = placed_data
-
-                    # Update target image
-                    image = placed_img
-
-                    # Track pasted objects
-                    pasted_boxes.append(placed_box.squeeze(0))
-                    pasted_masks_list.append(placed_mask.squeeze(0))
-                    pasted_labels_list.append(placed_label.squeeze(0))
-
-        # Update annotations
-        if pasted_masks_list:
-            # Add pasted objects to annotations
-            pasted_masks = torch.stack(pasted_masks_list, dim=0)
-            pasted_boxes_tensor = torch.stack(pasted_boxes, dim=0)
-            pasted_labels = torch.stack(pasted_labels_list, dim=0)
-
-            # Update existing objects for occlusion and filter out heavily occluded ones
-            masks, boxes, labels = self._update_and_filter_occluded_objects(
-                masks, boxes, labels, pasted_masks
+        target_size = (image.shape[1], image.shape[2])  # (H, W)
+        if padding_mask is not None:
+            assert padding_mask.shape[1:] == image.shape[1:], (
+                "Padding mask shape mismatch"
             )
 
-            # Concatenate with pasted objects
-            all_boxes = torch.cat([boxes, pasted_boxes_tensor], dim=0)
-            all_labels = torch.cat([labels, pasted_labels], dim=0)
-            all_masks = torch.cat([masks, pasted_masks], dim=0)
-        else:
-            all_boxes = boxes
-            all_labels = labels
-            all_masks = masks
+        for obj in paste_objects:
+            if not self._is_valid_object(obj):
+                continue
+
+            # Process each mask in the object
+            for i in range(obj.masks.shape[0]):
+                placement = self._try_place_single_object(
+                    image, obj, i, target_size, pasted_boxes, padding_mask
+                )
+
+                if placement:
+                    image = placement.image  # Update for next placement
+                    pasted_boxes.append(placement.box.squeeze(0))
+                    pasted_results.append(placement)
+
+        return pasted_results
+
+    def _is_valid_object(self, obj: DetectionTarget) -> bool:
+        """Check if object is valid for pasting."""
+        return obj.masks.numel() > 0
+
+    def _try_place_single_object(
+        self,
+        image: torch.Tensor,
+        obj: DetectionTarget,
+        obj_idx: int,
+        target_size: Tuple[int, int],
+        existing_boxes: List[torch.Tensor],
+        padding_mask: Optional[torch.Tensor],
+    ) -> Optional[PlacementResult]:
+        """Try to place a single object on the image."""
+        # Extract object components (keep batch dimension for consistency)
+        obj_mask = obj.masks[obj_idx : obj_idx + 1]
+        obj_box = obj.boxes[obj_idx : obj_idx + 1]
+        obj_label = obj.labels[obj_idx : obj_idx + 1]
+
+        # Crop source image and mask to bounding box region
+        x1, y1, x2, y2 = obj_box[0].int()
+
+        # Ensure coordinates are within image boundaries
+        img_h, img_w = obj.image.shape[1], obj.image.shape[2]
+        x1 = max(0, min(x1, img_w - 1))
+        y1 = max(0, min(y1, img_h - 1))
+        x2 = max(x1 + 1, min(x2, img_w))
+        y2 = max(y1 + 1, min(y2, img_h))
+
+        cropped_source_image = obj.image[:, y1:y2, x1:x2]
+        cropped_mask = obj_mask[:, y1:y2, x1:x2]
+
+        # Try placement
+        result = self._place_object(
+            image,
+            cropped_source_image,
+            cropped_mask,
+            obj_box,
+            obj_label,
+            target_size,
+            existing_boxes,
+            max_attempts=10,
+            padding_mask=padding_mask,
+        )
+
+        return result
+
+    def _update_annotations(
+        self, target_data: DetectionTarget, pasted_results: List[PlacementResult]
+    ) -> DetectionTarget:
+        """Update target annotations with pasted objects."""
+        # Extract pasted data
+        final_image = pasted_results[-1].image  # Use final image state
+        pasted_masks = torch.stack([r.mask.squeeze(0) for r in pasted_results])
+        pasted_boxes = torch.stack([r.box.squeeze(0) for r in pasted_results])
+        pasted_labels = torch.stack([r.label.squeeze(0) for r in pasted_results])
+
+        # Update existing objects for occlusion
+        updated_masks, updated_boxes, updated_labels = (
+            self._update_and_filter_occluded_objects(
+                target_data.masks, target_data.boxes, target_data.labels, pasted_masks
+            )
+        )
+
+        # Combine all annotations
+        all_masks = torch.cat([updated_masks, pasted_masks], dim=0)
+        all_boxes = torch.cat([updated_boxes, pasted_boxes], dim=0)
+        all_labels = torch.cat([updated_labels, pasted_labels], dim=0)
 
         return DetectionTarget(
-            image=image, boxes=all_boxes, labels=all_labels, masks=all_masks
+            image=final_image,
+            masks=all_masks,
+            boxes=all_boxes,
+            labels=all_labels,
+            padding_mask=target_data.padding_mask,
         )
 
     def _place_object(
@@ -178,106 +208,98 @@ class CopyPasteAugmentation:
         source_label: torch.Tensor,
         target_size: Tuple[int, int],
         existing_boxes: List[torch.Tensor],
-        max_attempts: int = 10,
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Place an object on the target image.
+        max_attempts: int,
+        padding_mask: Optional[torch.Tensor],
+    ) -> Optional[PlacementResult]:
+        """Place an object on the target image."""
+        obj_h = int(source_box[0, 3] - source_box[0, 1])
+        obj_w = int(source_box[0, 2] - source_box[0, 0])
 
-        Args:
-            target_image: Target image [C, H, W]
-            source_image: Source image [C, H, W]
-            source_mask: Source mask [1, H, W]
-            source_box: Source bounding box [1, 4]
-            source_label: Source label [1]
-            target_size: Target image size (H, W)
-            existing_boxes: List of already placed boxes
-            max_attempts: Maximum placement attempts
+        # Try to find valid placement position
+        placement_pos = self._find_valid_placement(
+            target_size,
+            (obj_h, obj_w),
+            existing_boxes,
+            padding_mask,
+            max_attempts,
+        )
+        if placement_pos is None:
+            return None
 
-        Returns:
-            Tuple of (updated_image, placed_mask, placed_box, placed_label) or None
-        """
+        top, left = placement_pos
+
+        # Create placed objects
+        placed_image = self._blend_object_on_target(
+            target_image, source_image, source_mask, top, left
+        )
+        placed_mask = self._create_placed_mask(source_mask, target_size, top, left)
+        placed_box = self._create_placed_box(source_box, left, top, obj_w, obj_h)
+
+        return PlacementResult(placed_image, placed_mask, placed_box, source_label)
+
+    def _find_valid_placement(
+        self,
+        target_size: Tuple[int, int],
+        object_size: Tuple[int, int],
+        existing_boxes: List[torch.Tensor],
+        padding_mask: Optional[torch.Tensor],
+        max_attempts: int,
+    ) -> Optional[Tuple[int, int]]:
+        """Find a valid placement position for the object."""
         target_h, target_w = target_size
-        source_h, source_w = source_image.shape[1], source_image.shape[2]
+        obj_h, obj_w = object_size
 
-        # Apply random scaling
-        scale_min, scale_max = self.config.scale_range
-        scale_factor = torch.rand(1).item() * (scale_max - scale_min) + scale_min
+        placer = create_object_placer(
+            image_height=target_h,
+            image_width=target_w,
+            existing_boxes=existing_boxes,
+            padding_mask=padding_mask,
+            margin=0,
+            collision_threshold=0.9,
+        )
 
-        if scale_factor != 1.0:
-            new_h = int(source_h * scale_factor)
-            new_w = int(source_w * scale_factor)
+        candidate = placer.find_valid_placement(obj_h, obj_w, max_attempts)
 
-            if new_h <= 0 or new_w <= 0 or new_h > target_h or new_w > target_w:
-                return None
+        if candidate is None:
+            return None
 
-            # Resize source image and mask
-            source_image = F.interpolate(
-                source_image.unsqueeze(0),
-                size=(new_h, new_w),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
+        return candidate.top, candidate.left
 
-            source_mask = F.interpolate(
-                source_mask.unsqueeze(0),
-                size=(new_h, new_w),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            source_mask = (source_mask > 0.5).float()
+    def _create_placed_mask(
+        self,
+        source_mask: torch.Tensor,
+        target_size: Tuple[int, int],
+        top: int,
+        left: int,
+    ) -> torch.Tensor:
+        """Create mask for placed object in target coordinates."""
+        target_h, target_w = target_size
+        source_h, source_w = source_mask.shape[1], source_mask.shape[2]
 
-            source_h, source_w = new_h, new_w
+        placed_mask = torch.zeros(
+            1, target_h, target_w, dtype=source_mask.dtype, device=source_mask.device
+        )
 
-        # Apply random horizontal flip
-        if self.config.enable_flip and torch.rand(1).item() < 0.5:
-            source_image = torch.flip(source_image, dims=[2])
-            source_mask = torch.flip(source_mask, dims=[2])
+        # Ensure we don't go beyond target boundaries
+        actual_h = min(source_h, target_h - top)
+        actual_w = min(source_w, target_w - left)
 
-        # Try to find valid placement
-        for _ in range(max_attempts):
-            # Get random placement
-            top, left = get_random_placement(
-                target_h, target_w, source_h, source_w, margin=10
-            )
-
-            # Check bounds
-            if top + source_h > target_h or left + source_w > target_w:
-                continue
-
-            # Create new box for placed object
-            new_box = torch.tensor(
-                [[left, top, left + source_w, top + source_h]],
-                dtype=source_box.dtype,
-                device=source_box.device,
-            )
-
-            # Check collision with existing boxes
-            if existing_boxes:
-                existing_boxes_tensor = torch.stack(existing_boxes, dim=0)
-                if check_collision(
-                    new_box[0], existing_boxes_tensor, iou_threshold=0.1
-                ):
-                    continue
-
-            # Place the object
-            placed_image = self._blend_object_on_target(
-                target_image, source_image, source_mask, top, left
-            )
-
-            # Create mask for placed object in target coordinates
-            placed_mask = torch.zeros(
-                1,
-                target_h,
-                target_w,
-                dtype=source_mask.dtype,
-                device=source_mask.device,
-            )
-            placed_mask[0, top : top + source_h, left : left + source_w] = source_mask[
-                0
+        if actual_h > 0 and actual_w > 0:
+            placed_mask[0, top : top + actual_h, left : left + actual_w] = source_mask[
+                0, :actual_h, :actual_w
             ]
 
-            return placed_image, placed_mask, new_box, source_label
+        return placed_mask
 
-        return None
+    def _create_placed_box(
+        self, source_box: torch.Tensor, left: int, top: int, width: int, height: int
+    ) -> torch.Tensor:
+        """Create bounding box for placed object."""
+        return torch.tensor(
+            [[left, top, left + width, top + height]],
+            dtype=source_box.dtype,
+            device=source_box.device,
+        )
 
     def _blend_object_on_target(
         self,
@@ -287,41 +309,40 @@ class CopyPasteAugmentation:
         top: int,
         left: int,
     ) -> torch.Tensor:
-        """Blend source object onto target image.
-
-        Args:
-            target_image: Target image [C, H, W]
-            source_image: Source image/patch [C, H_src, W_src]
-            source_mask: Source mask [1, H_src, W_src]
-            top: Top coordinate for placement
-            left: Left coordinate for placement
-
-        Returns:
-            Blended target image
-        """
+        """Blend source object onto target image using simple alpha blending."""
         result_image = target_image.clone()
         source_h, source_w = source_image.shape[1], source_image.shape[2]
 
-        # Extract target region
-        target_region = target_image[:, top : top + source_h, left : left + source_w]
+        # Extract target region - make sure it doesn't go beyond image bounds
+        target_h, target_w = target_image.shape[1], target_image.shape[2]
 
-        # Create smooth mask for better blending
-        smooth_mask = create_smooth_mask_border(
-            source_mask[0], border_width=3, sigma=1.0
+        # Clamp the region to fit within target image
+        actual_h = min(source_h, target_h - top)
+        actual_w = min(source_w, target_w - left)
+
+        if actual_h <= 0 or actual_w <= 0:
+            return result_image  # Nothing to blend
+
+        target_region = target_image[:, top : top + actual_h, left : left + actual_w]
+
+        # Crop source image and mask to match the actual region size
+        cropped_source = source_image[:, :actual_h, :actual_w]
+        cropped_mask = source_mask[:, :actual_h, :actual_w]
+
+        # Get the mask and ensure it matches the source image dimensions
+        mask = cropped_mask[0]  # Remove the first dimension
+
+        # Ensure mask has proper dimensions for broadcasting
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)  # Add channel dimension
+
+        # Simple alpha blending: target * (1 - mask) + source * mask
+        alpha = 1.0
+        blended_region = target_region * (1.0 - alpha * mask) + cropped_source * (
+            alpha * mask
         )
 
-        # Blend source onto target region
-        blended_region = blend_with_mode(
-            source_image,
-            target_region,
-            smooth_mask,
-            mode=self.config.blend_mode,
-            alpha=0.9,
-            sigma=1.5,
-        )
-
-        # Update result image
-        result_image[:, top : top + source_h, left : left + source_w] = blended_region
+        result_image[:, top : top + actual_h, left : left + actual_w] = blended_region
 
         return result_image
 
@@ -332,64 +353,63 @@ class CopyPasteAugmentation:
         original_labels: torch.Tensor,
         pasted_masks: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Update masks based on occlusion and filter heavily occluded objects.
-
-        Args:
-            original_masks: Original object masks [N, H, W]
-            original_boxes: Original bounding boxes [N, 4]
-            original_labels: Original labels [N]
-            pasted_masks: Pasted object masks [M, H, W]
-
-        Returns:
-            Tuple of (filtered_masks, filtered_boxes, filtered_labels)
-        """
+        """Update masks for occlusion and filter heavily occluded objects."""
         if original_masks.numel() == 0:
             return original_masks, original_boxes, original_labels
 
-        # Combine all pasted masks to create occlusion mask
-        occlusion_mask = pasted_masks.sum(dim=0) > 0  # [H, W]
+        # Remove occluded parts from original masks
+        occlusion_mask = pasted_masks.sum(dim=0) > 0
+        updated_masks = original_masks * (~occlusion_mask).float()
 
-        # Update original masks by removing occluded parts
-        updated_masks = original_masks.clone()
-        for i in range(len(original_masks)):
-            # Remove occluded pixels
-            updated_masks[i] = updated_masks[i] * (~occlusion_mask).float()
-
-        # Compute areas for filtering
-        original_areas = compute_mask_area(original_masks)
-        updated_areas = compute_mask_area(updated_masks)
-
-        # Find valid masks (not completely occluded and below occlusion threshold)
-        valid_mask = updated_areas > 0  # Must have some area left
-
-        # Also check occlusion ratio for objects that still have area
-        occlusion_ratios = 1.0 - (updated_areas / (original_areas + 1e-8))
-        occlusion_valid = occlusion_ratios <= self.config.occluded_area_threshold
-
-        # Combine both conditions
-        valid_indices = torch.where(valid_mask & occlusion_valid)[0]
+        # Filter objects based on remaining area
+        valid_indices = self._find_valid_objects(original_masks, updated_masks)
 
         if valid_indices.numel() == 0:
-            # No valid objects remain
-            img_height, img_width = original_masks.shape[1], original_masks.shape[2]
-            empty_masks = torch.empty(
-                (0, img_height, img_width),
-                dtype=original_masks.dtype,
-                device=original_masks.device,
+            spatial_shape = (original_masks.shape[1], original_masks.shape[2])
+            return self._create_empty_annotations(
+                spatial_shape,
+                original_masks.device,
+                original_masks.dtype,
+                original_boxes.dtype,
+                original_labels.dtype,
             )
-            empty_boxes = torch.empty(
-                (0, 4), dtype=original_boxes.dtype, device=original_boxes.device
-            )
-            empty_labels = torch.empty(
-                (0,), dtype=original_labels.dtype, device=original_labels.device
-            )
-            return empty_masks, empty_boxes, empty_labels
 
-        # Filter to keep only valid objects
+        # Keep only valid objects and recompute boxes
         filtered_masks = updated_masks[valid_indices]
         filtered_labels = original_labels[valid_indices]
-
-        # Recompute bounding boxes from updated masks (only for valid objects)
         filtered_boxes = masks_to_boxes(filtered_masks)
 
         return filtered_masks, filtered_boxes, filtered_labels
+
+    def _find_valid_objects(
+        self, original_masks: torch.Tensor, updated_masks: torch.Tensor
+    ) -> torch.Tensor:
+        """Find objects that are not too heavily occluded."""
+        original_areas = compute_mask_area(original_masks)
+        updated_areas = compute_mask_area(updated_masks)
+
+        # Objects must have remaining area
+        has_area = updated_areas > 0
+
+        # Objects must not be too occluded
+        occlusion_ratios = 1.0 - (updated_areas / (original_areas + 1e-8))
+        not_too_occluded = occlusion_ratios <= self.config.occluded_area_threshold
+
+        return torch.where(has_area & not_too_occluded)[0]
+
+    def _create_empty_annotations(
+        self,
+        spatial_shape: Tuple[int, int],
+        device: torch.device,
+        mask_dtype: torch.dtype,
+        box_dtype: torch.dtype,
+        label_dtype: torch.dtype,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Create empty annotations when no objects remain."""
+        img_height, img_width = spatial_shape
+        empty_masks = torch.empty(
+            (0, img_height, img_width), dtype=mask_dtype, device=device
+        )
+        empty_boxes = torch.empty((0, 4), dtype=box_dtype, device=device)
+        empty_labels = torch.empty((0,), dtype=label_dtype, device=device)
+        return empty_masks, empty_boxes, empty_labels
