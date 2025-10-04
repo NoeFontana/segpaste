@@ -35,7 +35,7 @@ class CopyPasteTransform(torch.nn.Module):
         self.copy_paste: CopyPasteAugmentation = augmentation
         self.source_objects: List[DetectionTarget] = source_objects
 
-    def forward(self, sample: Dict[str, Any]) -> Dict[str, Any]:
+    def forward(self, sample: Dict[str, Any]) -> Dict[str, DetectionTarget.TYPES]:
         """Apply copy-paste augmentation to sample.
 
         Args:
@@ -50,18 +50,14 @@ class CopyPasteTransform(torch.nn.Module):
             boxes=sample["boxes"],
             labels=sample["labels"],
             masks=sample["masks"],
+            padding_mask=sample.get("padding_mask"),
         )
 
         # Apply copy-paste
         augmented = self.copy_paste.transform(target_data, self.source_objects)
 
         # Convert back to dictionary
-        result = {
-            "image": augmented.image,
-            "boxes": augmented.boxes,
-            "labels": augmented.labels,
-            "masks": augmented.masks,
-        }
+        result = augmented.to_dict()
 
         # Copy any additional keys from original sample
         for key, value in sample.items():
@@ -100,8 +96,6 @@ class CopyPasteCollator:
     ) -> Dict[str, Union[torch.Tensor, List[torch.Tensor]]]:
         """Collate batch with copy-paste augmentation.
 
-        #TODO: If images are padded, ensure pasting happens in the valid image area.
-
         Args:
             batch: List of sample dictionaries
 
@@ -122,6 +116,7 @@ class CopyPasteCollator:
                         boxes=sample["boxes"][i : i + 1],
                         labels=sample["labels"][i : i + 1],
                         masks=sample["masks"][i : i + 1],
+                        padding_mask=sample.get("padding_mask"),
                     )
                     all_objects.append(obj)
 
@@ -133,6 +128,7 @@ class CopyPasteCollator:
                 boxes=sample["boxes"],
                 labels=sample["labels"],
                 masks=sample["masks"],
+                padding_mask=sample.get("padding_mask"),
             )
 
             # Use other objects in batch as source objects
@@ -146,13 +142,7 @@ class CopyPasteCollator:
                 augmented: DetectionTarget = self.copy_paste.transform(
                     target_data, source_objects
                 )
-                augmented_sample: Dict[str, Any] = {
-                    "image": augmented.image,
-                    "boxes": augmented.boxes,
-                    "labels": augmented.labels,
-                    "masks": augmented.masks,
-                }
-
+                augmented_sample: Dict[str, DetectionTarget.TYPES] = augmented.to_dict()
                 # Copy additional keys
                 for key, value in sample.items():
                     if key not in augmented_sample:
