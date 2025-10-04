@@ -117,7 +117,7 @@ class FixedSizeCrop(Transform):  # type: ignore[misc]
         return cropped
 
 
-class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):
+class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):  # type: ignore[misc]
     def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
         """Unlike the original SanitizeBoundingBoxes, this transform can also handle
         PaddingMask and will forward them unchanged."""
