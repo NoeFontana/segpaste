@@ -49,6 +49,7 @@ class DetectionTarget:
     boxes: BoxesTensor  # Shape: [N, 4], format: xyxy
     labels: LabelsTensor  # Shape: [N]
     masks: MasksTensor  # Shape: [N, H, W]
+    padding_mask: PaddingMask | None = None  # Shape: [1, H, W]
 
     @skip_if_compiling
     def __post_init__(self) -> None:
@@ -57,3 +58,8 @@ class DetectionTarget:
             raise ValueError("boxes and labels must have same number of objects")
         if self.masks.size(0) != self.boxes.size(0):
             raise ValueError("masks and boxes must have same number of objects")
+        if (
+            self.padding_mask is not None
+            and self.padding_mask.shape[1:] != self.image.shape[1:]
+        ):
+            raise ValueError("padding_mask must have same height and width as image")
