@@ -119,16 +119,25 @@ def create_smooth_mask_border(
         mask = mask.unsqueeze(0)
 
     # Create distance transform (approximate)
-    eroded_mask = mask.clone()
+    eroded_mask = mask.to(torch.float32)
 
     # Apply erosion multiple times to create border effect
     kernel_size = 3
     padding = kernel_size // 2
-    erosion_kernel = torch.ones(1, 1, kernel_size, kernel_size, device=mask.device)
+    erosion_kernel = torch.ones(
+        1,
+        1,
+        kernel_size,
+        kernel_size,
+        device=eroded_mask.device,
+        dtype=eroded_mask.dtype,
+    )
 
     for _ in range(border_width):
         eroded_mask = F.conv2d(
-            eroded_mask.unsqueeze(0), erosion_kernel, padding=padding
+            eroded_mask.unsqueeze(0),
+            erosion_kernel,
+            padding=padding,
         ).squeeze(0)
         eroded_mask = (eroded_mask >= (kernel_size * kernel_size)).float()
 
