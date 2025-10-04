@@ -2,6 +2,8 @@
 
 A PyTorch implementation of "Simple Copy-Paste is a Strong Data Augmentation Method for Instance Segmentation" ([arXiv:2012.07177](https://arxiv.org/abs/2012.07177)).
 
+This package also provides integration with `torchvision` ecosystem.
+
 ## Installation
 
 ```bash
@@ -15,6 +17,38 @@ git clone https://github.com/NoeFontana/segpaste.git
 cd segpaste
 pip install -e .
 ```
+
+## Usage
+
+### TorchVision Integration
+
+Convenience types and wrappers are provided to ease integration with `torchvision` datasets and transforms.
+
+- `PaddingMask`: A TVTensor representing a padding mask.
+- `CocoDetectionV2`: A CocoDetection dataset that presents an interface compatible with `torchvision.transforms.v2` and with support for padding masks.
+- `SanitizeBoundingBoxes`: A small wrapper around `torchvision.transforms.v2.SanitizeBoundingBoxes` that adds support for `PaddingMask`.
+
+### Collator
+
+The recommended interface is through the `CopyPasteCollator` which can be used in lieu of a standard collate function in a PyTorch `DataLoader` as long as the batch_size is greater than 1.
+
+```python
+from segpaste import CopyPasteAugmentation, CopyPasteCollator, CopyPasteConfig
+
+config = CopyPasteConfig()
+augmentation = CopyPasteAugmentation(config)
+collator = CopyPasteCollator(augmentation)
+```
+
+Examples of usage can be found in the test suite.
+
+### Transform (Unstable API)
+
+A minimal working example with `CopyPasteTransform` can be found in the [examples](https://github.com/NoeFontana/segpaste/tree/main/examples).
+
+### Further
+
+The public API is exposed in the `segpaste` namespace. It is subject to breaking changes, without prior notice, until version 1.0.0.
 
 ## Development
 
