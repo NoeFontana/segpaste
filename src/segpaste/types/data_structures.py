@@ -1,6 +1,7 @@
 """Data structures for detection targets and bounding boxes."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from torchvision.tv_tensors import Mask
 
@@ -77,3 +78,16 @@ class DetectionTarget:
             "masks": self.masks,
             "padding_mask": self.padding_mask,
         }
+
+    @staticmethod
+    def from_dict(
+        data: dict[str, Any],
+    ) -> "DetectionTarget":
+        """Create DetectionTarget from a dictionary."""
+        return DetectionTarget(
+            image=data["image"],
+            boxes=data["boxes"],
+            labels=data["labels"],
+            masks=data["masks"],
+            padding_mask=data.get("padding_mask"),
+        )

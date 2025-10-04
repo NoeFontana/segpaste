@@ -19,7 +19,18 @@ class CopyPasteConfig:
     # Blending mode for pasted objects
     blend_mode: Literal["alpha", "gaussian"] = "alpha"
 
-    occluded_area_threshold: float = 0.99  # Objects with >99% occlusion are removed
+    # Min edge length of pasted objects after scaling
+    # Bounding boxes with smaller edges will be skipped
+    min_object_edge: int = 10
+
+    # Min mask area of pasted objects after scaling
+    # Masks with smaller area will be skipped
+    min_object_area: int = 50
+
+    # After pasting, objects with an occlusion ratio above this threshold are removed
+    # Occluded area ratio = 1 - (visible area / original area)
+    # Set to 1.0 to disable this filtering
+    occluded_area_threshold: float = 0.99
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""

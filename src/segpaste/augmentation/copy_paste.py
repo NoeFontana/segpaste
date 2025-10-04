@@ -124,7 +124,19 @@ class CopyPasteAugmentation:
 
     def _is_valid_object(self, obj: DetectionTarget) -> bool:
         """Check if object is valid for pasting."""
-        return obj.masks.numel() > 0
+        box_h, box_w = (
+            obj.boxes[:, 3] - obj.boxes[:, 1],
+            obj.boxes[:, 2] - obj.boxes[:, 0],
+        )
+
+        # Object must not be too thin
+        min_edge = min(box_h.min().item(), box_w.min().item())
+        if min_edge < self.config.min_object_edge:
+            return False
+        # Object pixel count must be sufficient
+        return (
+            not (obj.masks.sum(dim=(1, 2)) < self.config.min_object_area).any().item()
+        )
 
     def _try_place_single_object(
         self,
