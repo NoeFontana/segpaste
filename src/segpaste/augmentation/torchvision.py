@@ -44,17 +44,11 @@ class CopyPasteTransform(torch.nn.Module):
         Returns:
             Augmented sample dictionary
         """
-        # Convert to DetectionTarget
-        target_data = DetectionTarget(
-            image=sample["image"],
-            boxes=sample["boxes"],
-            labels=sample["labels"],
-            masks=sample["masks"],
-            padding_mask=sample.get("padding_mask"),
-        )
 
         # Apply copy-paste
-        augmented = self.copy_paste.transform(target_data, self.source_objects)
+        augmented = self.copy_paste.transform(
+            DetectionTarget.from_dict(sample), self.source_objects
+        )
 
         # Convert back to dictionary
         result = augmented.to_dict()
