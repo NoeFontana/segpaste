@@ -43,6 +43,12 @@ include = ["/src", "/tests", "/README.md", "/LICENSE"]
 packages = ["src/segpaste"]
 artifacts = ["src/segpaste/py.typed"]
 
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
 [tool.ruff]
 lint.select = ["E", "W", "F", "I", "B", "C4", "ARG", "SIM"]
 lint.ignore = []
