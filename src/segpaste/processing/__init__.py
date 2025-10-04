@@ -7,7 +7,6 @@ from segpaste.processing.blending import (
     gaussian_blend,
 )
 from segpaste.processing.masks import boxes_to_masks, compute_mask_area
-from segpaste.processing.placement import check_collision, get_random_placement
 
 __all__ = [
     "alpha_blend",
@@ -16,6 +15,4 @@ __all__ = [
     "create_smooth_mask_border",
     "boxes_to_masks",
     "compute_mask_area",
-    "check_collision",
-    "get_random_placement",
 ]
