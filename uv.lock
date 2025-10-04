@@ -2520,13 +2520,13 @@ name = "segpaste"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "faster-coco-eval" },
     { name = "torch" },
     { name = "torchvision" },
 ]
 
 [package.dev-dependencies]
 coco = [
-    { name = "faster-coco-eval" },
     { name = "fiftyone" },
 ]
 dev = [
@@ -2538,15 +2538,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "faster-coco-eval", specifier = ">=1.6.8" },
     { name = "torch", specifier = ">=2.8" },
     { name = "torchvision", specifier = ">=0.23.0" },
 ]
 
 [package.metadata.requires-dev]
-coco = [
-    { name = "faster-coco-eval", specifier = ">=1.6.8" },
-    { name = "fiftyone", specifier = ">=1.8.0" },
-]
+coco = [{ name = "fiftyone", specifier = ">=1.8.0" }]
 dev = [
     { name = "mypy", specifier = ">=1.0" },
     { name = "pytest", specifier = ">=7.0" },
