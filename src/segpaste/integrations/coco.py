@@ -2,9 +2,9 @@ import os
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
+import torchvision
 from faster_coco_eval import COCO
 from faster_coco_eval import mask as coco_mask
-from PIL import Image
 from torchvision import tv_tensors
 from torchvision.datasets import VisionDataset
 from torchvision.transforms import v2
@@ -68,9 +68,12 @@ class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
     def __len__(self) -> int:
         return len(self.valid_img_ids)
 
-    def _load_image(self, id: int) -> Image.Image:
-        path = self.coco.loadImgs(id)[0]["file_name"]
-        return Image.open(os.path.join(self.root, path)).convert("RGB")
+    def _load_image(self, id: int) -> torch.Tensor:
+        path = os.path.join(self.root, self.coco.loadImgs(id)[0]["file_name"])
+        image: torch.Tensor = torchvision.io.decode_image(
+            path, mode=torchvision.io.ImageReadMode.RGB
+        )
+        return image
 
     def _load_target(self, id: int) -> list[dict[str, Any]]:
         target: list[dict[str, Any]] = self.coco.loadAnns(self.coco.getAnnIds([id]))
@@ -86,7 +89,7 @@ class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
         image = self._load_image(image_id)
         target_list = self._load_target(image_id)
 
-        canvas_size = (image.height, image.width)
+        canvas_size = image.shape[-2:]  # (H, W)
 
         # Convert list of annotation dicts to the format expected by transforms v2
         if not target_list:
