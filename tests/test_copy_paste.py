@@ -141,14 +141,14 @@ class TestCopyPasteCollator:
     def test_collator_init(self) -> None:
         """Test CopyPasteCollator initialization."""
         config = CopyPasteConfig(paste_probability=0.8)
-        collator = CopyPasteCollator(config)
+        collator = CopyPasteCollator(CopyPasteAugmentation(config))
 
         assert collator.copy_paste.config.paste_probability == 0.8
 
     def test_collator_empty_batch(self) -> None:
         """Test collator with empty batch."""
         config = CopyPasteConfig()
-        collator = CopyPasteCollator(config)
+        collator = CopyPasteCollator(CopyPasteAugmentation(config))
 
         result = collator([])
         assert result == {}
@@ -204,7 +204,9 @@ class TestCopyPasteCollator:
                 min_paste_objects=5,
                 scale_range=(0.5, 2.0),
             )
-            collator: CopyPasteCollator = CopyPasteCollator(config)
+            collator: CopyPasteCollator = CopyPasteCollator(
+                CopyPasteAugmentation(config)
+            )
 
             # Apply collator to batch
             collated_batch: Dict[str, Any] = collator(batch_samples)

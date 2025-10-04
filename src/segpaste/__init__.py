@@ -9,6 +9,7 @@ except ImportError:
     logging.getLogger(__file__).warning("faster_coco_eval not found.")
     pass
 from segpaste.augmentation import (
+    CopyPasteAugmentation,
     CopyPasteCollator,
     CopyPasteTransform,
     FixedSizeCrop,
@@ -17,11 +18,14 @@ from segpaste.augmentation import (
     make_large_scale_jittering,
 )
 from segpaste.config import CopyPasteConfig
+from segpaste.integrations import CocoDetectionV2
 from segpaste.types import DetectionTarget, PaddingMask
 
 __all__ = [
     "PaddingMask",
+    "CocoDetectionV2",
     "CopyPasteConfig",
+    "CopyPasteAugmentation",
     "DetectionTarget",
     "CopyPasteTransform",
     "CopyPasteCollator",
