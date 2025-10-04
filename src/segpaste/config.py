@@ -13,16 +13,13 @@ class CopyPasteConfig:
 
     # Minimum and maximum number of objects to paste from source to target
     min_paste_objects: int = 1
-    max_paste_objects: int = 20
+    max_paste_objects: int = 5
 
-    scale_range: Tuple[float, float] = (0.1, 2.0)
+    scale_range: Tuple[float, float] = (0.5, 2.0)
     # Blending mode for pasted objects
     blend_mode: Literal["alpha", "gaussian"] = "alpha"
 
-    occluded_area_threshold: float = 0.3  # Objects with >30% occlusion are removed
-    box_update_threshold: float = 10.0  # Minimum pixel difference for box updates
-
-    enable_flip: bool = True
+    occluded_area_threshold: float = 0.99  # Objects with >99% occlusion are removed
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
