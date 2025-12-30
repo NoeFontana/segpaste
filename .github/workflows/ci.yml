@@ -9,6 +9,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: ["main"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     if: github.event.pull_request.draft == false
