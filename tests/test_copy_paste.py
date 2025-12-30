@@ -5,7 +5,6 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import pytest
@@ -28,7 +27,7 @@ from tests.shared import (
 
 
 def create_sample_detection_target(
-    num_objects: int = 2, image_size: Tuple[int, int, int] = (3, 224, 224)
+    num_objects: int = 2, image_size: tuple[int, int, int] = (3, 224, 224)
 ) -> DetectionTarget:
     """Create a sample detection target for testing."""
     c, h, w = image_size

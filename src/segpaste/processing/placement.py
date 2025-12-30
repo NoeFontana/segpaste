@@ -2,7 +2,7 @@
 
 import random
 from dataclasses import dataclass
-from typing import List, Optional, Protocol, Tuple
+from typing import Protocol
 
 import torch
 from torchvision.ops import box_iou
@@ -46,7 +46,7 @@ def get_random_placement(
     object_height: int,
     object_width: int,
     margin: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """Get random placement coordinates for an object.
 
     Args:
@@ -94,7 +94,7 @@ class PlacementGenerator(Protocol):
 
     def generate_candidate(
         self, object_height: int, object_width: int
-    ) -> Optional[PlacementCandidate]:
+    ) -> PlacementCandidate | None:
         """Generate a placement candidate."""
         ...
 
@@ -125,7 +125,7 @@ class RandomPlacementGenerator:
 
     def generate_candidate(
         self, object_height: int, object_width: int
-    ) -> Optional[PlacementCandidate]:
+    ) -> PlacementCandidate | None:
         """Generate a random placement candidate."""
         # Check if object can fit at all
         if (
@@ -189,7 +189,7 @@ class PaddingAwarePlacementGenerator:
 
     def generate_candidate(
         self, object_height: int, object_width: int
-    ) -> Optional[PlacementCandidate]:
+    ) -> PlacementCandidate | None:
         """Generate a placement candidate that respects padding constraints."""
         # Calculate valid placement bounds within the non-padded region
         min_top = self.valid_top + self.margin
@@ -234,7 +234,7 @@ class BoundsValidator:
 class OverlapValidator:
     """Validates that placement doesn't overlap too much with existing objects."""
 
-    def __init__(self, existing_boxes: List[torch.Tensor], iou_threshold: float):
+    def __init__(self, existing_boxes: list[torch.Tensor], iou_threshold: float):
         self.existing_boxes = existing_boxes
         self.iou_threshold = iou_threshold
 
@@ -258,14 +258,14 @@ class ObjectPlacer:
     """Handles finding valid placements for objects using a composable approach."""
 
     def __init__(
-        self, generator: PlacementGenerator, validators: List[PlacementValidator]
+        self, generator: PlacementGenerator, validators: list[PlacementValidator]
     ):
         self.generator = generator
         self.validators = validators
 
     def find_valid_placement(
         self, object_height: int, object_width: int, max_attempts: int
-    ) -> Optional[PlacementCandidate]:
+    ) -> PlacementCandidate | None:
         """Find a valid placement for an object."""
         for _ in range(max_attempts):
             candidate = self.generator.generate_candidate(object_height, object_width)
@@ -286,8 +286,8 @@ class ObjectPlacer:
 def create_object_placer(
     image_height: int,
     image_width: int,
-    existing_boxes: List[torch.Tensor],
-    padding_mask: Optional[torch.Tensor],
+    existing_boxes: list[torch.Tensor],
+    padding_mask: torch.Tensor | None,
     margin: int,
     collision_threshold: float,
 ) -> ObjectPlacer:
@@ -303,7 +303,7 @@ def create_object_placer(
         generator = RandomPlacementGenerator(image_height, image_width, margin)
 
     # Set up validators
-    validators: List[PlacementValidator] = [
+    validators: list[PlacementValidator] = [
         BoundsValidator(image_height, image_width),
         OverlapValidator(existing_boxes, collision_threshold),
     ]

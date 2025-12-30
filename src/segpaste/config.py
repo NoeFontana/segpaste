@@ -1,7 +1,7 @@
 """Configuration classes for copy-paste augmentation."""
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,7 +15,7 @@ class CopyPasteConfig:
     min_paste_objects: int = 1
     max_paste_objects: int = 5
 
-    scale_range: Tuple[float, float] = (0.5, 2.0)
+    scale_range: tuple[float, float] = (0.5, 2.0)
     # Blending mode for pasted objects
     blend_mode: Literal["alpha", "gaussian"] = "alpha"
 

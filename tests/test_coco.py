@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -70,7 +70,7 @@ class TestCocoDetectionV2:
     """Test cases for CocoDetectionV2 dataset class."""
 
     @pytest.fixture
-    def temp_coco_data(self, tmp_path: Path) -> Tuple[Path, Path]:
+    def temp_coco_data(self, tmp_path: Path) -> tuple[Path, Path]:
         """Create temporary COCO dataset files for testing."""
 
         # Create dummy images
@@ -132,7 +132,7 @@ class TestCocoDetectionV2:
 
         return image_dir, ann_path
 
-    def test_init_basic(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_init_basic(self, temp_coco_data: tuple[str, str]) -> None:
         """Test basic initialization of CocoDetectionV2."""
         image_dir, ann_path = temp_coco_data
 
@@ -143,7 +143,7 @@ class TestCocoDetectionV2:
         expected_keys = ["image_id", "padding_mask", "boxes", "labels", "masks"]
         assert dataset.target_keys == expected_keys
 
-    def test_init_custom_target_keys(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_init_custom_target_keys(self, temp_coco_data: tuple[str, str]) -> None:
         """Test initialization with custom target keys."""
         image_dir, ann_path = temp_coco_data
         custom_keys = ["image_id", "boxes", "labels"]
@@ -154,14 +154,14 @@ class TestCocoDetectionV2:
 
         assert dataset.target_keys == custom_keys
 
-    def test_len(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_len(self, temp_coco_data: tuple[str, str]) -> None:
         """Test dataset length."""
         image_dir, ann_path = temp_coco_data
         dataset = CocoDetectionV2(image_dir, ann_path)
 
         assert len(dataset) == 2
 
-    def test_load_image(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_load_image(self, temp_coco_data: tuple[str, str]) -> None:
         """Test image loading."""
         image_dir, ann_path = temp_coco_data
         dataset = CocoDetectionV2(image_dir, ann_path)
@@ -172,7 +172,7 @@ class TestCocoDetectionV2:
         assert isinstance(image, torch.Tensor)
         assert image.shape == (3, 100, 100)
 
-    def test_load_target(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_load_target(self, temp_coco_data: tuple[str, str]) -> None:
         """Test target loading."""
         image_dir, ann_path = temp_coco_data
         dataset = CocoDetectionV2(image_dir, ann_path)
@@ -188,7 +188,7 @@ class TestCocoDetectionV2:
 
     @patch("segpaste.integrations.coco.segmentation_to_mask")
     def test_getitem_with_masks(
-        self, mock_seg_to_mask: Any, temp_coco_data: Tuple[str, str]
+        self, mock_seg_to_mask: Any, temp_coco_data: tuple[str, str]
     ) -> None:
         """Test __getitem__ with masks enabled."""
         image_dir, ann_path = temp_coco_data
@@ -196,7 +196,7 @@ class TestCocoDetectionV2:
         # Mock segmentation_to_mask to return dummy masks
         def mock_seg_fn(
             segmentation: Any,  # noqa: ARG001
-            canvas_size: Tuple[int, int],
+            canvas_size: tuple[int, int],
         ) -> torch.Tensor:
             return torch.ones(canvas_size[0], canvas_size[1], dtype=torch.uint8)
 
@@ -238,7 +238,7 @@ class TestCocoDetectionV2:
         # Check that segmentation_to_mask was called for each annotation
         assert mock_seg_to_mask.call_count == 2
 
-    def test_getitem_without_masks(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_getitem_without_masks(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ without masks."""
         image_dir, ann_path = temp_coco_data
 
@@ -256,7 +256,7 @@ class TestCocoDetectionV2:
         assert "boxes" in target
         assert "labels" in target
 
-    def test_getitem_with_padding_mask(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_getitem_with_padding_mask(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ with padding_mask enabled."""
         image_dir, ann_path = temp_coco_data
 
@@ -275,7 +275,7 @@ class TestCocoDetectionV2:
         assert target["padding_mask"].dtype == torch.bool
         assert not torch.any(target["padding_mask"])
 
-    def test_getitem_empty_target(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_getitem_empty_target(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ behavior with empty targets."""
         image_dir, ann_path = temp_coco_data
 
@@ -284,7 +284,7 @@ class TestCocoDetectionV2:
         dataset = CocoDetectionV2(image_dir, ann_path)
         dataset.valid_img_ids = [3]  # Image 3 has no annotations
 
-        image, target = dataset[0]
+        _, target = dataset[0]
 
         # Check empty target structure
         assert target["image_id"] == 3
@@ -297,7 +297,7 @@ class TestCocoDetectionV2:
         assert target["labels"].shape == (0,)
         assert target["masks"].shape == (0, 100, 100)
 
-    def test_getitem_with_transforms(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_getitem_with_transforms(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ with transforms applied."""
         image_dir, ann_path = temp_coco_data
 
@@ -336,7 +336,7 @@ class TestCocoDetectionV2:
     )
     def test_getitem_pixel_masks(
         self,
-        temp_coco_data: Tuple[str, str],
+        temp_coco_data: tuple[str, str],
         scale: float,
         expected_values: torch.Tensor,
     ) -> None:
@@ -366,7 +366,7 @@ class TestCocoDetectionV2:
         assert target["padding_mask"].shape == (1, 256, 256)
         assert torch.equal(target["padding_mask"].unique(), expected_values)
 
-    def test_bbox_format_conversion(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_bbox_format_conversion(self, temp_coco_data: tuple[str, str]) -> None:
         """Test that bounding boxes are correctly converted from XYWH to XYXY."""
         image_dir, ann_path = temp_coco_data
 
@@ -374,7 +374,7 @@ class TestCocoDetectionV2:
             image_folder=image_dir, label_path=ann_path, target_keys=["boxes"]
         )
 
-        image, target = dataset[0]  # First image has bbox [10, 10, 30, 30] in XYWH
+        _, target = dataset[0]  # First image has bbox [10, 10, 30, 30] in XYWH
 
         boxes = target["boxes"]
         assert isinstance(boxes, tv_tensors.BoundingBoxes)
@@ -420,7 +420,7 @@ class TestCreateCocoDataloader:
     """Test cases for create_coco_dataloader function."""
 
     @pytest.fixture
-    def temp_coco_data(self) -> Tuple[str, str]:
+    def temp_coco_data(self) -> tuple[str, str]:
         """Create temporary COCO dataset files for testing."""
         temp_dir = tempfile.mkdtemp()
 
@@ -473,7 +473,7 @@ class TestCreateCocoDataloader:
         return image_dir, ann_path
 
     def test_create_coco_dataloader_basic(
-        self, temp_coco_data: Tuple[str, str]
+        self, temp_coco_data: tuple[str, str]
     ) -> None:
         """Test basic dataloader creation."""
         image_dir, ann_path = temp_coco_data
@@ -517,7 +517,7 @@ class TestCreateCocoDataloader:
             assert isinstance(sample["labels"], torch.Tensor)
             assert isinstance(sample["masks"], torch.Tensor)
 
-    def test_coco_collate_fn(self, temp_coco_data: Tuple[str, str]) -> None:
+    def test_coco_collate_fn(self, temp_coco_data: tuple[str, str]) -> None:
         """Test the custom collate function."""
         image_dir, ann_path = temp_coco_data
 

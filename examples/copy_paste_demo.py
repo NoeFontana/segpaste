@@ -5,7 +5,6 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import List
 
 import torch
 from torchvision.transforms import v2
@@ -121,7 +120,7 @@ def demonstrate_copy_paste_augmentation() -> None:
 
 
 def save_demo_images(
-    original_samples: List[DetectionTarget], augmented_samples: List[DetectionTarget]
+    original_samples: list[DetectionTarget], augmented_samples: list[DetectionTarget]
 ) -> None:
     """Save original and augmented images for visual comparison using torchvision.
 

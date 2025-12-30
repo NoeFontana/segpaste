@@ -22,14 +22,14 @@ from segpaste.integrations import CocoDetectionV2
 from segpaste.types import DetectionTarget, PaddingMask
 
 __all__ = [
-    "PaddingMask",
     "CocoDetectionV2",
-    "CopyPasteConfig",
     "CopyPasteAugmentation",
-    "DetectionTarget",
-    "CopyPasteTransform",
     "CopyPasteCollator",
+    "CopyPasteConfig",
+    "CopyPasteTransform",
+    "DetectionTarget",
     "FixedSizeCrop",
+    "PaddingMask",
     "RandomResize",
     "SanitizeBoundingBoxes",
     "make_large_scale_jittering",

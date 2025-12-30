@@ -10,9 +10,9 @@ from segpaste.processing.masks import boxes_to_masks, compute_mask_area
 
 __all__ = [
     "alpha_blend",
-    "gaussian_blend",
     "blend_with_mode",
-    "create_smooth_mask_border",
     "boxes_to_masks",
     "compute_mask_area",
+    "create_smooth_mask_border",
+    "gaussian_blend",
 ]
