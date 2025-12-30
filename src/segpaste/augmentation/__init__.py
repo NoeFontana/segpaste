@@ -11,8 +11,8 @@ from segpaste.augmentation.torchvision import CopyPasteCollator, CopyPasteTransf
 
 __all__ = [
     "CopyPasteAugmentation",
-    "CopyPasteTransform",
     "CopyPasteCollator",
+    "CopyPasteTransform",
     "FixedSizeCrop",
     "RandomResize",
     "SanitizeBoundingBoxes",

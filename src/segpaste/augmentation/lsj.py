@@ -1,5 +1,5 @@
 import random
-from typing import Any, Tuple, Union
+from typing import Any
 
 import torch
 from torchvision import tv_tensors
@@ -138,10 +138,10 @@ class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):  # type: ignore[misc]
 
 
 def make_large_scale_jittering(
-    output_size: Union[int, Tuple[int, int]],
+    output_size: int | tuple[int, int],
     min_scale: float = 0.1,
     max_scale: float = 2.0,
-    img_pad_value: Union[float, int] = 0,
+    img_pad_value: float | int = 0,
     seg_pad_value: int = 255,
 ) -> Transform:
     """

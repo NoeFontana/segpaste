@@ -1,7 +1,6 @@
 """Copy-paste augmentation implementation for PyTorch."""
 
 import random
-from typing import List, Optional, Tuple
 
 import torch
 from torchvision.ops import masks_to_boxes
@@ -33,7 +32,7 @@ class CopyPasteAugmentation:
     def transform(
         self,
         target_data: DetectionTarget,
-        source_objects: List[DetectionTarget],
+        source_objects: list[DetectionTarget],
     ) -> DetectionTarget:
         """Apply copy-paste augmentation to target image."""
         if not self._should_apply_augmentation(target_data, source_objects):
@@ -46,7 +45,7 @@ class CopyPasteAugmentation:
         return self._apply_copy_paste(target_data, selected_objects)
 
     def _should_apply_augmentation(
-        self, target_data: DetectionTarget, source_objects: List[DetectionTarget]
+        self, target_data: DetectionTarget, source_objects: list[DetectionTarget]
     ) -> bool:
         """Check if augmentation should be applied."""
         return (
@@ -56,8 +55,8 @@ class CopyPasteAugmentation:
         )
 
     def _select_objects_to_paste(
-        self, source_objects: List[DetectionTarget]
-    ) -> List[DetectionTarget]:
+        self, source_objects: list[DetectionTarget]
+    ) -> list[DetectionTarget]:
         """Select random objects to paste."""
         if not source_objects:
             return []
@@ -70,7 +69,7 @@ class CopyPasteAugmentation:
         return random.sample(source_objects, num_to_paste)
 
     def _apply_copy_paste(
-        self, target_data: DetectionTarget, paste_objects: List[DetectionTarget]
+        self, target_data: DetectionTarget, paste_objects: list[DetectionTarget]
     ) -> DetectionTarget:
         """Apply copy-paste augmentation to target image."""
         if target_data.masks is None:
@@ -92,18 +91,16 @@ class CopyPasteAugmentation:
     def _paste_all_objects(
         self,
         image: torch.Tensor,
-        padding_mask: Optional[torch.Tensor],
-        paste_objects: List[DetectionTarget],
-    ) -> List[PlacementResult]:
+        padding_mask: torch.Tensor | None,
+        paste_objects: list[DetectionTarget],
+    ) -> list[PlacementResult]:
         """Paste all objects onto the image and return successful placements."""
-        pasted_results: List[PlacementResult] = []
-        pasted_boxes: List[torch.Tensor] = []
+        pasted_results: list[PlacementResult] = []
+        pasted_boxes: list[torch.Tensor] = []
 
         target_size = (image.shape[1], image.shape[2])  # (H, W)
-        if padding_mask is not None:
-            assert padding_mask.shape[1:] == image.shape[1:], (
-                "Padding mask shape mismatch"
-            )
+        if padding_mask is not None and padding_mask.shape[1:] != image.shape[1:]:
+            raise ValueError("Padding mask shape mismatch")
 
         for obj in paste_objects:
             if not self._is_valid_object(obj):
@@ -143,10 +140,10 @@ class CopyPasteAugmentation:
         image: torch.Tensor,
         obj: DetectionTarget,
         obj_idx: int,
-        target_size: Tuple[int, int],
-        existing_boxes: List[torch.Tensor],
-        padding_mask: Optional[torch.Tensor],
-    ) -> Optional[PlacementResult]:
+        target_size: tuple[int, int],
+        existing_boxes: list[torch.Tensor],
+        padding_mask: torch.Tensor | None,
+    ) -> PlacementResult | None:
         """Try to place a single object on the image."""
         # Extract object components (keep batch dimension for consistency)
         obj_mask = obj.masks[obj_idx : obj_idx + 1]
@@ -182,7 +179,7 @@ class CopyPasteAugmentation:
         return result
 
     def _update_annotations(
-        self, target_data: DetectionTarget, pasted_results: List[PlacementResult]
+        self, target_data: DetectionTarget, pasted_results: list[PlacementResult]
     ) -> DetectionTarget:
         """Update target annotations with pasted objects."""
         # Extract pasted data
@@ -218,11 +215,11 @@ class CopyPasteAugmentation:
         source_mask: torch.Tensor,
         source_box: torch.Tensor,
         source_label: torch.Tensor,
-        target_size: Tuple[int, int],
-        existing_boxes: List[torch.Tensor],
+        target_size: tuple[int, int],
+        existing_boxes: list[torch.Tensor],
         max_attempts: int,
-        padding_mask: Optional[torch.Tensor],
-    ) -> Optional[PlacementResult]:
+        padding_mask: torch.Tensor | None,
+    ) -> PlacementResult | None:
         """Place an object on the target image."""
         obj_h = int(source_box[0, 3] - source_box[0, 1])
         obj_w = int(source_box[0, 2] - source_box[0, 0])
@@ -251,12 +248,12 @@ class CopyPasteAugmentation:
 
     def _find_valid_placement(
         self,
-        target_size: Tuple[int, int],
-        object_size: Tuple[int, int],
-        existing_boxes: List[torch.Tensor],
-        padding_mask: Optional[torch.Tensor],
+        target_size: tuple[int, int],
+        object_size: tuple[int, int],
+        existing_boxes: list[torch.Tensor],
+        padding_mask: torch.Tensor | None,
         max_attempts: int,
-    ) -> Optional[Tuple[int, int]]:
+    ) -> tuple[int, int] | None:
         """Find a valid placement position for the object."""
         target_h, target_w = target_size
         obj_h, obj_w = object_size
@@ -280,7 +277,7 @@ class CopyPasteAugmentation:
     def _create_placed_mask(
         self,
         source_mask: torch.Tensor,
-        target_size: Tuple[int, int],
+        target_size: tuple[int, int],
         top: int,
         left: int,
     ) -> torch.Tensor:
@@ -364,7 +361,7 @@ class CopyPasteAugmentation:
         original_boxes: torch.Tensor,
         original_labels: torch.Tensor,
         pasted_masks: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Update masks for occlusion and filter heavily occluded objects."""
         if original_masks.numel() == 0:
             return original_masks, original_boxes, original_labels
@@ -411,12 +408,12 @@ class CopyPasteAugmentation:
 
     def _create_empty_annotations(
         self,
-        spatial_shape: Tuple[int, int],
+        spatial_shape: tuple[int, int],
         device: torch.device,
         mask_dtype: torch.dtype,
         box_dtype: torch.dtype,
         label_dtype: torch.dtype,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Create empty annotations when no objects remain."""
         img_height, img_width = spatial_shape
         empty_masks = torch.empty(

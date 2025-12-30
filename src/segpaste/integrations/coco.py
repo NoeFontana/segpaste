@@ -1,5 +1,6 @@
 import os
-from typing import Any, Callable, Dict, List, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torchvision
@@ -156,7 +157,7 @@ class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
 
 
 def labels_getter(
-    sample: tuple[tv_tensors.Image, Dict[str, tv_tensors.TVTensor]],
+    sample: tuple[tv_tensors.Image, dict[str, tv_tensors.TVTensor]],
 ) -> tuple[tv_tensors.BoundingBoxes, tv_tensors.Mask, torch.Tensor]:
     """Extract labels tensor from the sample structure."""
     target = sample[1]
@@ -166,14 +167,14 @@ def labels_getter(
 
 
 def add_image_collate_fn(
-    batch: List[Tuple[tv_tensors.Image, Dict[str, Any]]],
-) -> List[Dict[str, torch.Tensor]]:
+    batch: list[tuple[tv_tensors.Image, dict[str, Any]]],
+) -> list[dict[str, torch.Tensor]]:
     """Custom collate function to convert COCO annotations to expected format.
 
     Converts a batch of (image, target) into a list of dictionaries
         containing the 'image' and all target keys.
     """
-    samples: List[Dict[str, torch.Tensor]] = []
+    samples: list[dict[str, torch.Tensor]] = []
 
     for image, targets in batch:
         sample = targets.copy()

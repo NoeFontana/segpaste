@@ -2,7 +2,6 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import Tuple, Union
 
 import pytest
 import torch
@@ -18,7 +17,7 @@ from segpaste.augmentation import (
 from segpaste.types import DetectionTarget
 
 
-def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:
+def create_test_image(size: tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:
     """Create a test image with gradient pattern for visual verification."""
     c, h, w = size
     image = torch.zeros(c, h, w, dtype=torch.uint8)
@@ -33,7 +32,7 @@ def create_test_image(size: Tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.
     return F.to_image(image)
 
 
-def create_test_mask(size: Tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
+def create_test_mask(size: tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
     """Create a test mask with multiple classes in different regions."""
     h, w = size
     mask = torch.zeros(h, w, dtype=torch.uint8)
@@ -64,11 +63,11 @@ def create_test_mask(size: Tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
 
 
 def create_detection_target(
-    image_size: Tuple[int, int, int] = (3, 224, 224),
+    image_size: tuple[int, int, int] = (3, 224, 224),
     num_objects: int = 3,
 ) -> DetectionTarget:
     """Create a test detection target with boxes, labels, and masks."""
-    c, h, w = image_size
+    _, h, w = image_size
     image = create_test_image(image_size)
 
     # Create random boxes
@@ -786,9 +785,7 @@ class TestLargeScaleJittering:
         assert torch.equal(result1, result2)
 
     @pytest.mark.parametrize("output_size", [64, 128, 256, (128, 256), (256, 128)])
-    def test_different_output_sizes(
-        self, output_size: Union[int, Tuple[int, int]]
-    ) -> None:
+    def test_different_output_sizes(self, output_size: int | tuple[int, int]) -> None:
         """Test with different output sizes."""
         transform = make_large_scale_jittering(
             output_size=output_size,

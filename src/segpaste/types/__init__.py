@@ -14,10 +14,10 @@ from segpaste.types.type_aliases import (
 
 __all__ = [
     "BoundingBox",
-    "DetectionTarget",
-    "PaddingMask",
-    "ImageTensor",
     "BoxesTensor",
-    "MasksTensor",
+    "DetectionTarget",
+    "ImageTensor",
     "LabelsTensor",
+    "MasksTensor",
+    "PaddingMask",
 ]
