@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "segpaste"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A Python package for copy-paste functionality. Torch only reimplementation of https://arxiv.org/abs/2012.07177"
 authors = [{ name = "Noé Fontana", email = "noe.fontana.pro@gmail.com" }]
 readme = "README.md"
@@ -36,6 +36,9 @@ Homepage = "https://github.com/NoeFontana/segpaste"
 Repository = "https://github.com/NoeFontana/segpaste"
 Issues = "https://github.com/NoeFontana/segpaste/issues"
 
+[tool.hatch.version]
+source = "vcs"
+
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
@@ -50,7 +53,20 @@ publish-url = "https://test.pypi.org/legacy/"
 explicit = true
 
 [tool.ruff]
-lint.select = ["E", "W", "F", "I", "B", "C4", "ARG", "SIM", "UP", "N", "S", "RUF"]
+lint.select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "C4",
+    "ARG",
+    "SIM",
+    "UP",
+    "N",
+    "S",
+    "RUF",
+]
 lint.ignore = ["N812", "S311"]
 
 lint.fixable = ["ALL"]
