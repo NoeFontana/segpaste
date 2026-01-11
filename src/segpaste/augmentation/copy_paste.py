@@ -121,6 +121,9 @@ class CopyPasteAugmentation:
 
     def _is_valid_object(self, obj: DetectionTarget) -> bool:
         """Check if object is valid for pasting."""
+        if obj.boxes.shape[0] == 0:
+            return False
+
         box_h, box_w = (
             obj.boxes[:, 3] - obj.boxes[:, 1],
             obj.boxes[:, 2] - obj.boxes[:, 0],
