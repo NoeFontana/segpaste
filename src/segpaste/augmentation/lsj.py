@@ -61,12 +61,12 @@ class FixedSizeCrop(Transform):  # type: ignore[misc]
         )
         # If the input is smaller than the output size, we pad it
         if h < self.output_height:
-            if isinstance(cropped, (tv_tensors.Image, tv_tensors.Video)):
+            if isinstance(cropped, tv_tensors.Image | tv_tensors.Video):
                 cropped[..., h:, :] = self.img_pad_value
             elif isinstance(cropped, tv_tensors.Mask):
                 cropped[..., h:, :] = self.seg_pad_value
         if w < self.output_width:
-            if isinstance(cropped, (tv_tensors.Image, tv_tensors.Video)):
+            if isinstance(cropped, tv_tensors.Image | tv_tensors.Video):
                 cropped[..., :, w:] = self.img_pad_value
             elif isinstance(cropped, tv_tensors.Mask):
                 cropped[..., :, w:] = self.seg_pad_value
@@ -129,7 +129,7 @@ class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):  # type: ignore[misc]
             return inpt[params["valid"]]
 
         is_bounding_boxes_or_mask = isinstance(
-            inpt, (tv_tensors.BoundingBoxes, tv_tensors.Mask)
+            inpt, tv_tensors.BoundingBoxes | tv_tensors.Mask
         ) and not isinstance(inpt, PaddingMask)
         if not is_bounding_boxes_or_mask:
             return inpt

@@ -224,7 +224,7 @@ class TestCopyPasteCollator:
             assert isinstance(samples["labels"], list)
             assert isinstance(samples["masks"], list)
 
-            assert isinstance(samples.get("padding_mask"), (torch.Tensor, type(None)))
+            assert isinstance(samples.get("padding_mask"), torch.Tensor | type(None))
 
             # Verify each sample in batch
             for i in range(len(samples["boxes"])):
