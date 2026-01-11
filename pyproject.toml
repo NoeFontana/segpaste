@@ -19,7 +19,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = ["faster-coco-eval>=1.6.8", "torch>=2.8", "torchvision>=0.23.0"]
+dependencies = [
+    "faster-coco-eval>=1.6.8",
+    "pydantic>=2.12.5",
+    "torch>=2.8",
+    "torchvision>=0.23.0",
+]
 
 [dependency-groups]
 coco = ["fiftyone>=1.8.0"]
@@ -150,6 +155,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 show_error_codes = true
 strict = true
+plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = ["torchvision.*", "fiftyone.*", "faster_coco_eval.*"]

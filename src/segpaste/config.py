@@ -1,23 +1,25 @@
 """Configuration classes for copy-paste augmentation."""
 
-from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-@dataclass(frozen=True, slots=True)
-class CopyPasteConfig:
+
+class CopyPasteConfig(BaseModel):
     """Configuration for copy-paste augmentation."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     # Probability of applying copy-paste augmentation
-    paste_probability: float = 0.5
+    paste_probability: float = Field(0.5, ge=0.0, le=1.0)
 
     # Minimum and maximum number of objects to paste from source to target
-    min_paste_objects: int = 1
-    max_paste_objects: int = 5
+    min_paste_objects: int = Field(1, ge=0)
+    max_paste_objects: int = Field(5, ge=0)
 
     scale_range: tuple[float, float] = (0.5, 2.0)
     # Blending mode for pasted objects
-    blend_mode: Literal["alpha", "gaussian"] = "alpha"
+    blend_mode: Literal["alpha", "gaussian", "poisson"] = "alpha"
 
     # Min edge length of pasted objects after scaling
     # Bounding boxes with smaller edges will be skipped
@@ -32,15 +34,13 @@ class CopyPasteConfig:
     # Set to 1.0 to disable this filtering
     occluded_area_threshold: float = 0.99
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def validate_config(self) -> "CopyPasteConfig":
         """Validate configuration parameters."""
-        if not 0.0 <= self.paste_probability <= 1.0:
-            raise ValueError("paste_probability must be between 0.0 and 1.0")
         if self.min_paste_objects > self.max_paste_objects:
             raise ValueError("min_paste_objects must be <= max_paste_objects")
-        if self.min_paste_objects < 0:
-            raise ValueError("min_paste_objects must be >= 0")
+
         if self.scale_range[0] > self.scale_range[1]:
             raise ValueError("scale_range min must be <= max")
-        if self.blend_mode not in ("alpha", "gaussian", "poisson"):
-            raise ValueError("blend_mode must be one of: alpha, gaussian, poisson")
+
+        return self

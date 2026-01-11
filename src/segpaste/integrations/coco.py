@@ -27,7 +27,7 @@ def segmentation_to_mask(
         torch.Tensor: Binary mask tensor.
     """
     # TODO: Clean that up
-    if not isinstance(segmentation, (dict, list)):
+    if not isinstance(segmentation, dict | list):
         raise ValueError(
             f"COCO segmentation expected to be dict or list, got {type(segmentation)}"
         )
