@@ -10,21 +10,42 @@ permissions:
   contents: write
 
 jobs:
-  deploy:
+  build-docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
+        run: uv python install
 
       - name: Install dependencies
         run: uv sync --group docs
 
-      - name: Deploy documentation
-        run: uv run mkdocs gh-deploy --force
+      - name: Build documentation
+        run: uv run mkdocs build --strict
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./site
+
+  deploy-docs:
+    needs: build-docs
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
