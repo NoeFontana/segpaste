@@ -1,0 +1,52 @@
+# Synthetic fixture manifest. Each entry describes one committed `.pt` file
+# under `tests/fixtures/synthetic/` plus the deterministic builder that can
+# regenerate it. Real-data fixtures (COCO-minitrain, Cityscapes-demo, NYUv2)
+# are deferred to P0.B.2 — see the ADR-0001 follow-up plan.
+
+[[fixture]]
+name = "two_overlapping_things"
+modalities = ["image", "instance"]
+shape = [3, 32, 32]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_two_overlapping_things"
+
+[[fixture]]
+name = "empty_instance"
+modalities = ["image", "instance"]
+shape = [3, 16, 16]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_empty_instance"
+
+[[fixture]]
+name = "semantic_with_ignore"
+modalities = ["image", "semantic"]
+shape = [3, 32, 32]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_semantic_with_ignore"
+
+[[fixture]]
+name = "panoptic_stuff_and_things"
+modalities = ["image", "instance", "semantic", "panoptic"]
+shape = [3, 32, 32]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_panoptic_stuff_and_things"
+
+[[fixture]]
+name = "depth_two_planes"
+modalities = ["image", "depth"]
+shape = [3, 32, 32]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_depth_two_planes"
+
+[[fixture]]
+name = "normals_sphere_patch"
+modalities = ["image", "normals"]
+shape = [3, 32, 32]
+source = "synthetic"
+licence = "project (MIT)"
+builder = "tests.fixtures.synthetic.builders.build_normals_sphere_patch"

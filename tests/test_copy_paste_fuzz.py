@@ -4,90 +4,18 @@ import pytest
 import torch
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from hypothesis.extra import numpy as npst
 
 from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.config import CopyPasteConfig
-from segpaste.types import DetectionTarget
-
-
-# Strategies for generating random tensors and detection targets
-@st.composite
-def image_tensor_strategy(draw: st.DrawFn) -> torch.Tensor:
-    """Generate a random image tensor (C, H, W)."""
-    # Restrict sizes to avoid OOM and speed up tests
-    h = draw(st.integers(min_value=16, max_value=256))
-    w = draw(st.integers(min_value=16, max_value=256))
-    c = 3  # Standard RGB
-
-    # Generate numpy array and convert to tensor
-    data = draw(
-        npst.arrays(
-            dtype=float,
-            shape=(c, h, w),
-            elements=st.floats(min_value=0.0, max_value=1.0),
-        )
-    )
-    return torch.from_numpy(data).float()
+from segpaste.types import DetectionTarget, Modality
+from tests.strategies import dense_sample_strategy
 
 
 @st.composite
-def detection_target_strategy(
-    draw: st.DrawFn, image_st: st.SearchStrategy[torch.Tensor] | None = None
-) -> DetectionTarget:
-    """Generate a random DetectionTarget."""
-    image = draw(image_tensor_strategy()) if image_st is None else draw(image_st)
-
-    _, h, w = image.shape
-
-    num_objects = draw(st.integers(min_value=0, max_value=5))
-
-    if num_objects == 0:
-        return DetectionTarget(
-            image=image,
-            boxes=torch.zeros((0, 4), dtype=torch.float32),
-            labels=torch.zeros((0,), dtype=torch.int64),
-            masks=torch.zeros((0, h, w), dtype=torch.float32),
-        )
-
-    # Generate boxes
-    boxes_list = []
-    masks_list = []
-    labels_list = []
-
-    for _ in range(num_objects):
-        # Generate valid box coordinates
-        x1 = draw(st.integers(min_value=0, max_value=w - 2))
-        y1 = draw(st.integers(min_value=0, max_value=h - 2))
-        x2 = draw(st.integers(min_value=x1 + 1, max_value=w - 1))
-        y2 = draw(st.integers(min_value=y1 + 1, max_value=h - 1))
-
-        boxes_list.append([x1, y1, x2, y2])
-
-        # Generate mask for the object
-        mask = torch.zeros((h, w), dtype=torch.float32)
-        # Fill a random sub-rectangle inside the box to be the mask
-        # This ensures mask is inside the box
-        mx1 = draw(st.integers(min_value=x1, max_value=x2 - 1))
-        my1 = draw(st.integers(min_value=y1, max_value=y2 - 1))
-        mx2 = draw(st.integers(min_value=mx1 + 1, max_value=x2))
-        my2 = draw(st.integers(min_value=my1 + 1, max_value=y2))
-
-        mask[my1:my2, mx1:mx2] = 1.0
-        masks_list.append(mask)
-
-        labels_list.append(draw(st.integers(min_value=1, max_value=100)))
-
-    boxes = torch.tensor(boxes_list, dtype=torch.float32)
-    masks = torch.stack(masks_list)
-    labels = torch.tensor(labels_list, dtype=torch.int64)
-
-    return DetectionTarget(
-        image=image,
-        boxes=boxes,
-        labels=labels,
-        masks=masks,
-    )
+def detection_target_strategy(draw: st.DrawFn) -> DetectionTarget:
+    """Draw a :class:`DetectionTarget` via the DenseSample bridge."""
+    sample = draw(dense_sample_strategy({Modality.INSTANCE}))
+    return sample.to_detection_target()
 
 
 class TestCopyPasteFuzzing:

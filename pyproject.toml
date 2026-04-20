@@ -147,6 +147,9 @@ addopts = [
     "--cov-report=html",
     "--cov-report=term-missing",
 ]
+markers = [
+    "invariant: ADR-0001 per-modality invariant check (see tests/test_invariant_matrix.py)",
+]
 
 [tool.pyright]
 include = ["src", "tests", "examples"]
