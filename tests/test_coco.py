@@ -167,7 +167,7 @@ class TestCocoDetectionV2:
         dataset = CocoDetectionV2(image_dir, ann_path)
 
         # Test loading first image
-        image = dataset._load_image(1)
+        image = dataset._load_image(1)  # pyright: ignore[reportPrivateUsage]
 
         assert isinstance(image, torch.Tensor)
         assert image.shape == (3, 100, 100)
@@ -178,7 +178,7 @@ class TestCocoDetectionV2:
         dataset = CocoDetectionV2(image_dir, ann_path)
 
         # Test loading targets for first image (has 2 annotations)
-        targets = dataset._load_target(1)
+        targets = dataset._load_target(1)  # pyright: ignore[reportPrivateUsage]
 
         assert isinstance(targets, list)
         assert len(targets) == 2
@@ -396,7 +396,7 @@ class TestLabelsGetter:
         """Test basic functionality of labels_getter."""
         # Create sample data
         image = tv_tensors.Image(torch.rand(3, 100, 100))
-        boxes = tv_tensors.BoundingBoxes(
+        boxes = tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
             torch.tensor([[10, 10, 20, 20]]),
             format=tv_tensors.BoundingBoxFormat.XYXY,
             canvas_size=(100, 100),
@@ -409,7 +409,7 @@ class TestLabelsGetter:
         sample = (image, target)
 
         # Test labels_getter
-        result_boxes, result_masks, result_labels = labels_getter(sample)
+        result_boxes, result_masks, result_labels = labels_getter(sample)  # pyright: ignore[reportArgumentType]
 
         assert torch.equal(result_boxes.data, boxes.data)
         assert torch.equal(result_masks.data, masks.data)

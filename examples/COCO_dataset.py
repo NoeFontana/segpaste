@@ -28,7 +28,7 @@ def download_coco_dataset() -> fo.Dataset:
         label_types=["detections", "segmentations"],
     )
 
-    logging.getLogger().info(f"Dataset loaded with {len(dataset)} samples")
+    logging.getLogger().info(f"Dataset loaded with {len(dataset)} samples")  # pyright: ignore[reportArgumentType]
     logging.getLogger().info(f"Dataset info: {dataset.info}")
 
     return dataset
@@ -304,10 +304,10 @@ def create_copy_paste_augmentation(num_samples: int = 20) -> None:
             continue
 
     logging.getLogger().info(
-        f"Created {len(augmented_dataset)} copy-paste augmented samples"
+        f"Created {len(augmented_dataset)} copy-paste augmented samples"  # pyright: ignore[reportArgumentType]
     )
 
-    if len(augmented_dataset) == 0:
+    if len(augmented_dataset) == 0:  # pyright: ignore[reportArgumentType]
         logging.getLogger().error("No augmented samples were created")
         return
 

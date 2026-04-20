@@ -86,7 +86,7 @@ def check_collision(
 
     # Compute IoU
     ious = box_iou(new_box.unsqueeze(0), existing_boxes)
-    return (ious > iou_threshold).any().item()  # type: ignore[no-any-return]
+    return (ious > iou_threshold).any().item()  # pyright: ignore[reportReturnType]
 
 
 class PlacementGenerator(Protocol):

@@ -20,4 +20,4 @@ def skip_if_compiling(func: F) -> F:
         # When compiling, do nothing.
         return None
 
-    return wrapper  # type: ignore[return-value]
+    return wrapper  # pyright: ignore[reportReturnType]

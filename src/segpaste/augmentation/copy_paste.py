@@ -35,7 +35,7 @@ class CopyPasteAugmentation:
         source_objects: list[DetectionTarget],
     ) -> DetectionTarget:
         """Apply copy-paste augmentation to target image."""
-        if not self._should_apply_augmentation(target_data, source_objects):
+        if not self._should_apply_augmentation(source_objects):
             return target_data
 
         selected_objects = self._select_objects_to_paste(source_objects)
@@ -44,14 +44,10 @@ class CopyPasteAugmentation:
 
         return self._apply_copy_paste(target_data, selected_objects)
 
-    def _should_apply_augmentation(
-        self, target_data: DetectionTarget, source_objects: list[DetectionTarget]
-    ) -> bool:
+    def _should_apply_augmentation(self, source_objects: list[DetectionTarget]) -> bool:
         """Check if augmentation should be applied."""
         return (
-            len(source_objects) > 0
-            and target_data.masks is not None
-            and random.random() <= self.config.paste_probability
+            len(source_objects) > 0 and random.random() <= self.config.paste_probability
         )
 
     def _select_objects_to_paste(
@@ -72,9 +68,6 @@ class CopyPasteAugmentation:
         self, target_data: DetectionTarget, paste_objects: list[DetectionTarget]
     ) -> DetectionTarget:
         """Apply copy-paste augmentation to target image."""
-        if target_data.masks is None:
-            return target_data
-
         # Paste objects and collect results
         pasted_results = self._paste_all_objects(
             target_data.image.clone(),

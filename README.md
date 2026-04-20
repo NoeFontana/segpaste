@@ -58,14 +58,14 @@ The public API is exposed in the `segpaste` namespace. It is subject to breaking
 
 ## Development
 
-This project uses [Ruff](https://github.com/astral-sh/ruff) for linting/formatting and [mypy](http://mypy-lang.org/) for type checking.
+This project uses [Ruff](https://github.com/astral-sh/ruff) for linting/formatting and [pyright](https://github.com/microsoft/pyright) for type checking.
 
 ```bash
 # Install development dependencies
 pip install -e ".[dev,coco]"
 
 # Format, lint, and type-check
-ruff format . && ruff check --fix . && mypy .
+ruff format . && ruff check --fix . && pyright
 
 # Run tests
 pytest

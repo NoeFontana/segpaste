@@ -36,7 +36,7 @@ class TestConfigValidation:
     def test_invalid_blend_mode(self) -> None:
         """Test invalid blend mode raises ValidationError."""
         with pytest.raises(ValidationError):
-            CopyPasteConfig(blend_mode="invalid")
+            CopyPasteConfig(blend_mode="invalid")  # pyright: ignore[reportArgumentType]
 
     def test_valid_config(self) -> None:
         """Test valid configuration."""
@@ -56,4 +56,4 @@ class TestConfigValidation:
     def test_forbid_extra_fields(self) -> None:
         """Test that unknown arguments raise ValidationError."""
         with pytest.raises(ValidationError):
-            CopyPasteConfig(unknown_field=123)  # type: ignore
+            CopyPasteConfig(unknown_field=123)  # pyright: ignore[reportCallIssue]
