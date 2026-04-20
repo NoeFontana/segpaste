@@ -51,4 +51,9 @@ jobs:
         run: uv run pyright
 
       - name: Test with pytest
-        run: uv run pytest
+        timeout-minutes: 10
+        run: |
+          start=$(date +%s)
+          uv run pytest
+          end=$(date +%s)
+          echo "pytest wall-clock: $((end - start))s"

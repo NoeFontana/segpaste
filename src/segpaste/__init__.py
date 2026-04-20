@@ -19,18 +19,35 @@ from segpaste.augmentation import (
 )
 from segpaste.config import CopyPasteConfig
 from segpaste.integrations import CocoDetectionV2
-from segpaste.types import DetectionTarget, PaddingMask
+from segpaste.types import (
+    CameraIntrinsics,
+    DenseSample,
+    DetectionTarget,
+    InstanceMask,
+    Modality,
+    PaddingMask,
+    PanopticMap,
+    PanopticSchema,
+    SemanticMap,
+)
 
 __all__ = [
+    "CameraIntrinsics",
     "CocoDetectionV2",
     "CopyPasteAugmentation",
     "CopyPasteCollator",
     "CopyPasteConfig",
     "CopyPasteTransform",
+    "DenseSample",
     "DetectionTarget",
     "FixedSizeCrop",
+    "InstanceMask",
+    "Modality",
     "PaddingMask",
+    "PanopticMap",
+    "PanopticSchema",
     "RandomResize",
     "SanitizeBoundingBoxes",
+    "SemanticMap",
     "make_large_scale_jittering",
 ]
