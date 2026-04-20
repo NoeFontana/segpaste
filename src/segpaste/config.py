@@ -11,11 +11,11 @@ class CopyPasteConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # Probability of applying copy-paste augmentation
-    paste_probability: float = Field(0.5, ge=0.0, le=1.0)
+    paste_probability: float = Field(default=0.5, ge=0.0, le=1.0)
 
     # Minimum and maximum number of objects to paste from source to target
-    min_paste_objects: int = Field(1, ge=0)
-    max_paste_objects: int = Field(5, ge=0)
+    min_paste_objects: int = Field(default=1, ge=0)
+    max_paste_objects: int = Field(default=5, ge=0)
 
     scale_range: tuple[float, float] = (0.5, 2.0)
     # Blending mode for pasted objects

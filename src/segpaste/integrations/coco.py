@@ -37,17 +37,17 @@ def segmentation_to_mask(
         # if counts is a string, it is already an encoded RLE mask
         if not isinstance(segmentation["counts"], str):
             segmentation = coco_mask.frPyObjects(segmentation, h, w)
-    elif isinstance(segmentation, list):
+    else:
         segmentation = coco_mask.merge(coco_mask.frPyObjects(segmentation, h, w))  # pyright: ignore[reportArgumentType]
     return torch.from_numpy(coco_mask.decode(segmentation))
 
 
-class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
+class CocoDetectionV2(VisionDataset):
     def __init__(
         self,
         image_folder: str,
         label_path: str,
-        transforms: Callable | None = None,  # type: ignore[type-arg]
+        transforms: Callable | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
         target_keys: list[str] | None = None,
     ):
         super().__init__(root=image_folder, transforms=transforms)
@@ -81,7 +81,7 @@ class CocoDetectionV2(VisionDataset):  # type: ignore[misc]
         return target
 
     def __getitem__(self, index: int) -> tuple[Any, Any]:
-        if not isinstance(index, int):
+        if not isinstance(index, int):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError(
                 f"Index must be of type integer, got {type(index)} instead."
             )

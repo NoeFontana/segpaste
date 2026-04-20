@@ -38,7 +38,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4.0",
-    "mypy>=1.0",
+    "pyright>=1.1.380",
     "hypothesis>=6.150.0",
 ]
 
@@ -91,7 +91,6 @@ exclude = [
     ".git",
     ".git-rewrite",
     ".hg",
-    ".mypy_cache",
     ".nox",
     ".pants.d",
     ".pytype",
@@ -149,17 +148,19 @@ addopts = [
     "--cov-report=term-missing",
 ]
 
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-show_error_codes = true
-strict = true
-plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = ["torchvision.*", "fiftyone.*", "faster_coco_eval.*"]
-
-# The rule to apply
-ignore_missing_imports = true
+[tool.pyright]
+include = ["src", "tests", "examples"]
+pythonVersion = "3.11"
+pythonPlatform = "Linux"
+typeCheckingMode = "strict"
+# torchvision, fiftyone, and faster_coco_eval don't ship type stubs.
+# Pyright falls back to source-level inference via useLibraryCodeForTypes
+# (default true), but partial inference surfaces as the reports below.
+# Downgrading these is the pyright-side equivalent of mypy's
+# `[[tool.mypy.overrides]] ignore_missing_imports = true` — they only
+# fire when pyright can't fully type a symbol, which in this project is
+# effectively isolated to those three libraries.
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"

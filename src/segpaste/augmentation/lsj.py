@@ -16,7 +16,7 @@ from torchvision.transforms.v2 import functional as F
 from segpaste.types.data_structures import PaddingMask
 
 
-class FixedSizeCrop(Transform):  # type: ignore[misc]
+class FixedSizeCrop(Transform):
     def __init__(
         self,
         output_height: int,
@@ -74,7 +74,7 @@ class FixedSizeCrop(Transform):  # type: ignore[misc]
         return cropped
 
 
-class RandomResize(Transform):  # type: ignore[misc]
+class RandomResize(Transform):
     def __init__(
         self,
         min_scale: float,
@@ -117,7 +117,7 @@ class RandomResize(Transform):  # type: ignore[misc]
         return self._call_kernel(F.resize, inpt, [new_h, new_w])
 
 
-class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):  # type: ignore[misc]
+class SanitizeBoundingBoxes(tv_SanitizeBoundingBoxes):
     def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
         """Unlike the original SanitizeBoundingBoxes, this transform can also handle
         PaddingMask and will forward them unchanged."""

@@ -32,7 +32,7 @@ class BoundingBox:
             raise ValueError("y1 must be < y2")
 
 
-class PaddingMask(Mask):  # type: ignore[misc]
+class PaddingMask(Mask):
     """Unlike tv_tensor.Mask, PaddingMask is not associated with any object.
 
     It is used to indicate padded parts of an Image. Unlike tv_tensor.Mask, it is
