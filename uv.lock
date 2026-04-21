@@ -2873,6 +2873,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+bench = [
+    { name = "numpy" },
+]
 coco = [
     { name = "fiftyone" },
 ]
@@ -2898,6 +2901,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+bench = [{ name = "numpy", specifier = ">=1.26" }]
 coco = [{ name = "fiftyone", specifier = ">=1.8.0" }]
 dev = [
     { name = "hypothesis", specifier = ">=6.150.0" },

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "label": "CopyPasteCollator",
+  "device": "cpu",
+  "cpu_model": "AMD EPYC-Milan Processor",
+  "batch_size": 8,
+  "image_size": 512,
+  "k_range": [
+    1,
+    5
+  ],
+  "warmup": 200,
+  "iters": 1000,
+  "median_ns": 112751533,
+  "q1_ns": 102527921,
+  "q3_ns": 122759577,
+  "iqr_ns": 20231656,
+  "iqr_over_median": 0.17943575881942675,
+  "python": "3.13.12",
+  "torch": "2.8.0+cu128",
+  "torchvision": "0.23.0",
+  "segpaste_version": "0.2.1.dev11+g1d1781b1c.d20260420",
+  "commit_sha": "1d1781b1cca50dbcbcc89484ebb4e91853f0d7d4",
+  "runner": "dev-box-2026-01",
+  "timestamp": "2026-04-21T23:26:43+00:00"
+}

@@ -1,0 +1,103 @@
+# .github/workflows/bench.yml
+#
+# Performance regression gate for `CopyPasteCollator`.
+# Contract pinned in docs/adrs/0002-performance-baseline.md.
+
+name: bench
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    branches: ["main"]
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench-cpu-pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Cache uv venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: uv-bench-${{ runner.os }}-3.12-${{ hashFiles('**/pyproject.toml') }}
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --group bench
+
+      - name: Run benchmark
+        run: |
+          uv run python -m benchmarks.bench_copy_paste \
+            --device cpu --warmup 100 --iters 800 --image-size 512 \
+            --out current.json
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-cpu-pr-${{ github.event.pull_request.number }}-attempt-${{ github.run_attempt }}
+          path: current.json
+          retention-days: 14
+
+      - name: Check regression
+        if: >-
+          !contains(github.event.pull_request.labels.*.name, 'skip-perf-gate') &&
+          !(contains(github.event.pull_request.labels.*.name, 'retry-on-perf-flake') && github.run_attempt > 1)
+        run: |
+          uv run python -m benchmarks.compare \
+            --baseline benchmarks/baseline.json \
+            --current current.json \
+            --threshold 0.05
+
+  bench-cpu-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Cache uv venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: uv-bench-${{ runner.os }}-3.12-${{ hashFiles('**/pyproject.toml') }}
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --group bench
+
+      - name: Run 3 sequential bench passes
+        run: |
+          for i in 1 2 3; do
+            uv run python -m benchmarks.bench_copy_paste \
+              --device cpu --warmup 100 --iters 800 --image-size 512 \
+              --out "nightly-$i.json"
+          done
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-nightly-${{ github.run_id }}
+          path: nightly-*.json
+          retention-days: 14
