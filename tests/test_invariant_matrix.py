@@ -44,7 +44,7 @@ class InvariantRow:
 
 
 def _augment(sample: DenseSample) -> DenseSample:
-    """Run CopyPasteAugmentation round-trip via the DenseSample bridge."""
+    """Run CopyPasteAugmentation end-to-end on a :class:`DenseSample`."""
     cfg = CopyPasteConfig(
         paste_probability=1.0,
         min_paste_objects=1,
@@ -52,9 +52,7 @@ def _augment(sample: DenseSample) -> DenseSample:
         min_object_area=_MIN_OBJECT_AREA,
     )
     aug = CopyPasteAugmentation(cfg)
-    target = sample.to_detection_target()
-    result = aug.transform(target, [sample.to_detection_target()])
-    return DenseSample.from_detection_target(result)
+    return aug.transform(sample, [sample])
 
 
 def _driver_instance_bbox(data: st.DataObject) -> None:

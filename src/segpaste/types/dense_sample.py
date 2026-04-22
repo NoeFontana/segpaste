@@ -10,7 +10,7 @@ from torchvision import tv_tensors
 from torchvision.tv_tensors import Mask
 
 from segpaste.compile_util import skip_if_compiling
-from segpaste.types.data_structures import DetectionTarget, PaddingMask
+from segpaste.types.data_structures import PaddingMask
 
 
 class Modality(Enum):
@@ -71,7 +71,7 @@ class PanopticSchema(Protocol):
     max_instances_per_image: int
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class DenseSample:
     """Canonical per-sample container for dense-label Copy-Paste.
 
@@ -82,6 +82,8 @@ class DenseSample:
     image: tv_tensors.Image  # [C, H, W]
     boxes: tv_tensors.BoundingBoxes  # [N, 4], xyxy
     labels: torch.Tensor  # [N], int64
+    # [N] int32; co-optional with instance_masks
+    instance_ids: torch.Tensor | None = None
     instance_masks: InstanceMask | None = None  # [N, H, W], bool
     semantic_map: SemanticMap | None = None  # [H, W], int64
     panoptic_map: PanopticMap | None = None  # [H, W], int64
@@ -105,6 +107,16 @@ class DenseSample:
                 )
             if self.instance_masks.shape[-2:] != (h, w):
                 raise ValueError("instance_masks must share H, W with image")
+            if self.instance_ids is None:
+                raise ValueError(
+                    "instance_ids must be provided when instance_masks is set"
+                )
+            if self.instance_ids.dtype != torch.int32:
+                raise ValueError("instance_ids dtype must be int32")
+            if self.instance_ids.shape != (self.boxes.size(0),):
+                raise ValueError("instance_ids must be shape [N] matching boxes count")
+        elif self.instance_ids is not None:
+            raise ValueError("instance_ids requires instance_masks (co-optional)")
 
         if self.semantic_map is not None and self.semantic_map.shape[-2:] != (h, w):
             raise ValueError("semantic_map must share H, W with image")
@@ -155,40 +167,3 @@ class DenseSample:
     def from_dict(data: Mapping[str, Any]) -> "DenseSample":
         names = {f.name for f in fields(DenseSample)}
         return DenseSample(**{k: v for k, v in data.items() if k in names})
-
-    def to_detection_target(self) -> DetectionTarget:
-        """Project to the legacy instance-only container.
-
-        Bridge for the P0.B → P1 transition. Requires :class:`Modality.INSTANCE`
-        to be active; raises otherwise.
-        """
-        if self.instance_masks is None:
-            raise ValueError(
-                "to_detection_target requires instance_masks (INSTANCE modality)"
-            )
-        return DetectionTarget(
-            image=torch.as_tensor(self.image),
-            boxes=torch.as_tensor(self.boxes),
-            labels=self.labels,
-            masks=torch.as_tensor(self.instance_masks),
-            padding_mask=self.padding_mask,
-        )
-
-    @staticmethod
-    def from_detection_target(target: DetectionTarget) -> "DenseSample":
-        """Lift a legacy :class:`DetectionTarget` into a DenseSample."""
-        h, w = target.image.shape[-2:]
-        image = tv_tensors.Image(target.image)
-        boxes = tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
-            target.boxes,
-            format=tv_tensors.BoundingBoxFormat.XYXY,
-            canvas_size=(h, w),
-        )
-        instance_masks = InstanceMask(target.masks.to(torch.bool))
-        return DenseSample(
-            image=image,
-            boxes=boxes,
-            labels=target.labels,
-            instance_masks=instance_masks,
-            padding_mask=target.padding_mask,
-        )

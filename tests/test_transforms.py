@@ -14,7 +14,6 @@ from segpaste.augmentation import (
     RandomResize,
     make_large_scale_jittering,
 )
-from segpaste.types import DetectionTarget
 
 
 def create_test_image(size: tuple[int, int, int] = (3, 224, 224)) -> tv_tensors.Image:
@@ -60,41 +59,6 @@ def create_test_mask(size: tuple[int, int] = (224, 224)) -> tv_tensors.Mask:
                     mask[i, j] = 4
 
     return tv_tensors.Mask(mask)
-
-
-def create_detection_target(
-    image_size: tuple[int, int, int] = (3, 224, 224),
-    num_objects: int = 3,
-) -> DetectionTarget:
-    """Create a test detection target with boxes, labels, and masks."""
-    _, h, w = image_size
-    image = create_test_image(image_size)
-
-    # Create random boxes
-    boxes = torch.rand(num_objects, 4) * torch.tensor([w, h, w, h])
-    # Ensure boxes are valid (x1 < x2, y1 < y2)
-    boxes[:, 2] = torch.clamp(
-        boxes[:, 2], boxes[:, 0] + torch.tensor(10), torch.tensor(w)
-    )
-    boxes[:, 3] = torch.clamp(
-        boxes[:, 3], boxes[:, 1] + torch.tensor(10), torch.tensor(h)
-    )
-
-    # Create random labels
-    labels = torch.randint(1, 6, (num_objects,))
-
-    # Create masks for each object
-    masks = torch.zeros(num_objects, h, w, dtype=torch.uint8)
-    for i in range(num_objects):
-        x1, y1, x2, y2 = boxes[i].int()
-        masks[i, y1:y2, x1:x2] = 1
-
-    return DetectionTarget(
-        image=image,
-        boxes=boxes,
-        labels=labels,
-        masks=masks,
-    )
 
 
 class TestRandomResize:

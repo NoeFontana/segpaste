@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Demonstration of copy-paste augmentation functionality.
-
-Uses `DetectionTarget` (internal-only in 0.9.x; see ADR-0003). External
-consumers should migrate to `DenseSample` via `DenseSample.from_detection_target`.
-"""
+"""Demonstration of copy-paste augmentation functionality."""
 
 import argparse
 import logging
@@ -16,12 +12,11 @@ from torchvision.transforms import v2
 from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.config import CopyPasteConfig
 from segpaste.integrations import create_coco_dataloader
-from segpaste.types import DetectionTarget
+from segpaste.types import DenseSample
 
 
 def demonstrate_copy_paste_augmentation() -> None:
     """Demonstrate copy-paste augmentation with COCO dataset."""
-    # Check for COCO dataset
     default_path = Path.home() / "fiftyone" / "coco-2017" / "validation"
     dataset_path = os.environ.get("COCO_DATASET_PATH", str(default_path))
 
@@ -35,7 +30,6 @@ def demonstrate_copy_paste_augmentation() -> None:
         )
         return
 
-    # Create transforms
     transforms = v2.Compose(
         [
             v2.ToImage(),
@@ -44,7 +38,6 @@ def demonstrate_copy_paste_augmentation() -> None:
         ]
     )
 
-    # Create dataloader
     dataloader = create_coco_dataloader(
         image_folder=val_images_path,
         label_path=annotations_path,
@@ -52,10 +45,9 @@ def demonstrate_copy_paste_augmentation() -> None:
         batch_size=4,
     )
 
-    # Get a few samples
-    samples = []
+    samples: list[DenseSample] = []
     for i, batch in enumerate(dataloader):
-        if i >= 2:  # Get 2 batches (8 samples total)
+        if i >= 2:
             break
         samples.extend(batch)
 
@@ -63,43 +55,22 @@ def demonstrate_copy_paste_augmentation() -> None:
         logging.getLogger().error("Need at least 4 samples for demonstration")
         return
 
-    # Create copy-paste configuration
     config = CopyPasteConfig(
-        paste_probability=1.0,  # Always apply for demonstration
+        paste_probability=1.0,
         max_paste_objects=3,
         min_paste_objects=1,
         scale_range=(0.5, 2.0),
     )
 
-    # Initialize copy-paste augmentation
     copy_paste_aug = CopyPasteAugmentation(config)
 
     logging.getLogger().info(f"Demonstrating copy-paste on {len(samples)} samples...")
 
-    # Convert samples to DetectionTarget format
-    detection_targets = []
-    for sample in samples:
+    augmented_samples: list[DenseSample] = []
+    for i in range(len(samples) - 1):
+        target_data = samples[i]
+        source_objects = samples[i + 1 : i + 3]
         try:
-            target = DetectionTarget.from_dict(sample)
-            detection_targets.append(target)
-        except Exception as e:
-            logging.getLogger().warning(f"Failed to convert sample: {e}")
-            continue
-
-    if len(detection_targets) < 2:
-        logging.getLogger().error("Need at least 2 valid samples for copy-paste")
-        return
-
-    # Apply copy-paste augmentation
-    augmented_samples = []
-    for i in range(len(detection_targets) - 1):
-        target_data = detection_targets[i]
-
-        # Use other samples as source objects
-        source_objects = detection_targets[i + 1 : i + 3]  # Take up to 2 source samples
-
-        try:
-            # Apply copy-paste augmentation
             augmented_target = copy_paste_aug.transform(target_data, source_objects)
             augmented_samples.append(augmented_target)
 
@@ -118,28 +89,14 @@ def demonstrate_copy_paste_augmentation() -> None:
         f"Successfully created {len(augmented_samples)} augmented samples"
     )
 
-    # Optionally save images for visual inspection
     if os.environ.get("SAVE_DEMO_IMAGES", "0") == "1":
-        save_demo_images(detection_targets[: len(augmented_samples)], augmented_samples)
+        save_demo_images(samples[: len(augmented_samples)], augmented_samples)
 
 
 def save_demo_images(
-    original_samples: list[DetectionTarget], augmented_samples: list[DetectionTarget]
+    original_samples: list[DenseSample], augmented_samples: list[DenseSample]
 ) -> None:
-    """Save original and augmented images for visual comparison using torchvision.
-
-    Creates side-by-side comparison images showing the original images with
-    red bounding boxes and the copy-paste augmented images with blue bounding boxes.
-
-    Args:
-        original_samples: List of original DetectionTarget samples
-        augmented_samples: List of augmented DetectionTarget samples
-
-    The function uses torchvision utilities for:
-    - draw_bounding_boxes: Drawing colored bounding boxes with labels
-    - make_grid: Creating side-by-side comparisons
-    - save_image: Saving the final visualization
-    """
+    """Save original and augmented images for visual comparison using torchvision."""
     import torchvision.utils as tv_utils
 
     output_dir = Path("output")
@@ -148,16 +105,14 @@ def save_demo_images(
     for i, (original, augmented) in enumerate(
         zip(original_samples, augmented_samples, strict=True)
     ):
-        # Convert images to uint8 format (0-255) for drawing
-        orig_img = (original.image * 255).to(torch.uint8)
-        aug_img = (augmented.image * 255).to(torch.uint8)
+        orig_img = (original.image.as_subclass(torch.Tensor) * 255).to(torch.uint8)
+        aug_img = (augmented.image.as_subclass(torch.Tensor) * 255).to(torch.uint8)
 
-        # Draw bounding boxes on original image (red boxes)
         if len(original.boxes) > 0:
             orig_labels = [str(label.item()) for label in original.labels]
             orig_with_boxes = tv_utils.draw_bounding_boxes(
                 orig_img,
-                original.boxes,
+                original.boxes.as_subclass(torch.Tensor),
                 labels=orig_labels,
                 colors="red",
                 width=2,
@@ -165,12 +120,11 @@ def save_demo_images(
         else:
             orig_with_boxes = orig_img
 
-        # Draw bounding boxes on augmented image (blue boxes)
         if len(augmented.boxes) > 0:
             aug_labels = [str(label.item()) for label in augmented.labels]
             aug_with_boxes = tv_utils.draw_bounding_boxes(
                 aug_img,
-                augmented.boxes,
+                augmented.boxes.as_subclass(torch.Tensor),
                 labels=aug_labels,
                 colors="blue",
                 width=2,
@@ -178,15 +132,13 @@ def save_demo_images(
         else:
             aug_with_boxes = aug_img
 
-        # Create side-by-side grid
         grid = tv_utils.make_grid(
             [orig_with_boxes, aug_with_boxes],
             nrow=2,
             padding=10,
-            pad_value=255,  # White padding
+            pad_value=255,
         )
 
-        # Save the grid image
         output_path = output_dir / f"copy_paste_demo_{i}.png"
         tv_utils.save_image(grid.float() / 255.0, output_path)
 

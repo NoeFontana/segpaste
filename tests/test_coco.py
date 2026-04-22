@@ -19,6 +19,7 @@ from segpaste.integrations.coco import (
     labels_getter,
     segmentation_to_mask,
 )
+from segpaste.types import DenseSample
 from tests.shared import generate_scale_jitter_transform_strategy
 
 
@@ -27,11 +28,9 @@ class TestSegmentationToMask:
 
     def test_segmentation_to_mask_rle_dict(self) -> None:
         """Test conversion from RLE dict format."""
-        # Create a simple RLE segmentation in uncompressed format
-        # This will be processed by frPyObjects and then decoded
         segmentation = {
             "size": [10, 10],
-            "counts": [50, 4, 46],  # RLE: 50 zeros, 4 ones, 46 zeros
+            "counts": [50, 4, 46],
         }
         canvas_size = (10, 10)
 
@@ -39,13 +38,10 @@ class TestSegmentationToMask:
 
         assert isinstance(result, torch.Tensor)
         assert result.shape == (10, 10)
-        # Should have some non-zero values (the mask area)
         assert result.sum() == 4
 
     def test_segmentation_to_mask_polygon_list(self) -> None:
         """Test conversion from polygon list format."""
-        # Polygon format: list of [x1, y1, x2, y2, ...]
-        # Simple rectangle polygon
         segmentation = [[10.0, 10.0, 40.0, 10.0, 40.0, 40.0, 10.0, 40.0]]
         canvas_size = (75, 50)
 
@@ -53,7 +49,6 @@ class TestSegmentationToMask:
 
         assert isinstance(result, torch.Tensor)
         assert result.shape == (75, 50)
-        # Should have some non-zero values (the polygon area)
         assert result.sum() == 900
 
     def test_segmentation_to_mask_invalid_format(self) -> None:
@@ -73,16 +68,13 @@ class TestCocoDetectionV2:
     def temp_coco_data(self, tmp_path: Path) -> tuple[Path, Path]:
         """Create temporary COCO dataset files for testing."""
 
-        # Create dummy images
         image_dir = tmp_path / "images"
         image_dir.mkdir(parents=True)
 
-        # Create test images
         for i in range(3):
             img = Image.new("RGB", (100, 100), color=(255, 0, 0))
             img.save(image_dir / f"image_{i:03d}.jpg")
 
-        # Create COCO annotations
         annotations = {
             "images": [
                 {"id": 1, "file_name": "image_000.jpg", "height": 100, "width": 100},
@@ -94,30 +86,29 @@ class TestCocoDetectionV2:
                     "id": 1,
                     "image_id": 1,
                     "category_id": 1,
-                    "bbox": [10, 10, 30, 30],  # XYWH format
+                    "bbox": [10, 10, 30, 30],
                     "area": 900,
-                    "segmentation": [[10, 10, 40, 10, 40, 40, 10, 40]],  # Polygon
+                    "segmentation": [[10, 10, 40, 10, 40, 40, 10, 40]],
                     "iscrowd": 0,
                 },
                 {
                     "id": 2,
                     "image_id": 1,
                     "category_id": 2,
-                    "bbox": [50, 50, 20, 20],  # XYWH format
+                    "bbox": [50, 50, 20, 20],
                     "area": 400,
-                    "segmentation": [[50, 50, 70, 50, 70, 70, 50, 70]],  # Polygon
+                    "segmentation": [[50, 50, 70, 50, 70, 70, 50, 70]],
                     "iscrowd": 0,
                 },
                 {
                     "id": 3,
                     "image_id": 2,
                     "category_id": 1,
-                    "bbox": [5, 5, 25, 25],  # XYWH format
+                    "bbox": [5, 5, 25, 25],
                     "area": 625,
-                    "segmentation": [[5, 5, 30, 5, 30, 30, 5, 30]],  # Polygon
+                    "segmentation": [[5, 5, 30, 5, 30, 30, 5, 30]],
                     "iscrowd": 0,
                 },
-                # Image 3 has no annotations (will be filtered out)
             ],
             "categories": [
                 {"id": 1, "name": "person"},
@@ -125,7 +116,6 @@ class TestCocoDetectionV2:
             ],
         }
 
-        # Save annotations
         ann_path = tmp_path / "annotations.json"
         with open(ann_path, "w") as f:
             json.dump(annotations, f)
@@ -138,8 +128,8 @@ class TestCocoDetectionV2:
 
         dataset = CocoDetectionV2(image_folder=image_dir, label_path=ann_path)
 
-        assert len(dataset) == 2  # Only images with annotations
-        assert dataset.valid_img_ids == [1, 2]  # Sorted IDs with annotations
+        assert len(dataset) == 2
+        assert dataset.valid_img_ids == [1, 2]
         expected_keys = ["image_id", "padding_mask", "boxes", "labels", "masks"]
         assert dataset.target_keys == expected_keys
 
@@ -166,7 +156,6 @@ class TestCocoDetectionV2:
         image_dir, ann_path = temp_coco_data
         dataset = CocoDetectionV2(image_dir, ann_path)
 
-        # Test loading first image
         image = dataset._load_image(1)  # pyright: ignore[reportPrivateUsage]
 
         assert isinstance(image, torch.Tensor)
@@ -177,7 +166,6 @@ class TestCocoDetectionV2:
         image_dir, ann_path = temp_coco_data
         dataset = CocoDetectionV2(image_dir, ann_path)
 
-        # Test loading targets for first image (has 2 annotations)
         targets = dataset._load_target(1)  # pyright: ignore[reportPrivateUsage]
 
         assert isinstance(targets, list)
@@ -190,10 +178,9 @@ class TestCocoDetectionV2:
     def test_getitem_with_masks(
         self, mock_seg_to_mask: Any, temp_coco_data: tuple[str, str]
     ) -> None:
-        """Test __getitem__ with masks enabled."""
+        """``__getitem__`` returns a populated :class:`DenseSample`."""
         image_dir, ann_path = temp_coco_data
 
-        # Mock segmentation_to_mask to return dummy masks
         def mock_seg_fn(
             segmentation: Any,  # noqa: ARG001
             canvas_size: tuple[int, int],
@@ -208,53 +195,42 @@ class TestCocoDetectionV2:
             target_keys=["image_id", "boxes", "labels", "masks"],
         )
 
-        image, target = dataset[0]  # First image (id=1, has 2 annotations)
+        sample = dataset[0]
 
-        # Check image
-        assert isinstance(image, torch.Tensor)
-        assert image.shape == (3, 100, 100)
+        assert isinstance(sample, DenseSample)
+        assert sample.image.shape == (3, 100, 100)
+        assert isinstance(sample.boxes, tv_tensors.BoundingBoxes)
+        assert sample.boxes.shape == (2, 4)
+        assert sample.labels.shape == (2,)
+        assert sample.labels.tolist() == [1, 2]
 
-        # Check target structure
-        assert isinstance(target, dict)
-        assert "image_id" in target
-        assert "boxes" in target
-        assert "labels" in target
-        assert "masks" in target
+        assert sample.instance_masks is not None
+        assert sample.instance_masks.shape == (2, 100, 100)
+        assert sample.instance_masks.dtype == torch.bool
 
-        # Check target contents
-        assert target["image_id"] == 1
-        assert isinstance(target["boxes"], tv_tensors.BoundingBoxes)
-        assert isinstance(target["labels"], torch.Tensor)
-        assert isinstance(target["masks"], tv_tensors.Mask)
+        assert sample.instance_ids is not None
+        assert sample.instance_ids.dtype == torch.int32
+        assert sample.instance_ids.tolist() == [0, 1]
 
-        # Check shapes
-        assert target["boxes"].shape == (2, 4)  # 2 objects, 4 coords (XYXY)
-        assert target["labels"].shape == (2,)  # 2 objects
-        assert target["masks"].shape == (2, 100, 100)  # 2 objects, H, W
-
-        # Check labels
-        assert target["labels"].tolist() == [1, 2]
-
-        # Check that segmentation_to_mask was called for each annotation
         assert mock_seg_to_mask.call_count == 2
 
     def test_getitem_without_masks(self, temp_coco_data: tuple[str, str]) -> None:
-        """Test __getitem__ without masks."""
+        """Test __getitem__ without masks — instance_masks/ids stay None."""
         image_dir, ann_path = temp_coco_data
 
         dataset = CocoDetectionV2(
             image_folder=image_dir,
             label_path=ann_path,
-            target_keys=["image_id", "boxes", "labels"],  # No masks
+            target_keys=["image_id", "boxes", "labels"],
         )
 
-        _, target = dataset[0]
+        sample = dataset[0]
 
-        # Check that masks is not in target
-        assert "masks" not in target
-        assert "image_id" in target
-        assert "boxes" in target
-        assert "labels" in target
+        assert isinstance(sample, DenseSample)
+        assert sample.instance_masks is None
+        assert sample.instance_ids is None
+        assert sample.boxes.shape[0] == 2
+        assert sample.labels.shape[0] == 2
 
     def test_getitem_with_padding_mask(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ with padding_mask enabled."""
@@ -266,42 +242,34 @@ class TestCocoDetectionV2:
             target_keys=["image_id", "boxes", "labels", "padding_mask"],
         )
 
-        _, target = dataset[0]
+        sample = dataset[0]
 
-        # Check padding_mask
-        assert "padding_mask" in target
-        assert isinstance(target["padding_mask"], tv_tensors.Mask)
-        assert target["padding_mask"].shape == (1, 100, 100)  # 1xHxW
-        assert target["padding_mask"].dtype == torch.bool
-        assert not torch.any(target["padding_mask"])
+        assert sample.padding_mask is not None
+        assert sample.padding_mask.shape == (1, 100, 100)
+        assert sample.padding_mask.dtype == torch.bool
+        assert not torch.any(sample.padding_mask)
 
     def test_getitem_empty_target(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ behavior with empty targets."""
         image_dir, ann_path = temp_coco_data
 
-        # Create dataset but manually modify valid_img_ids to include
-        # image with no annotations
         dataset = CocoDetectionV2(image_dir, ann_path)
-        dataset.valid_img_ids = [3]  # Image 3 has no annotations
+        dataset.valid_img_ids = [3]
 
-        _, target = dataset[0]
+        sample = dataset[0]
 
-        # Check empty target structure
-        assert target["image_id"] == 3
-        assert isinstance(target["boxes"], tv_tensors.BoundingBoxes)
-        assert isinstance(target["labels"], torch.Tensor)
-        assert isinstance(target["masks"], tv_tensors.Mask)
-
-        # Check empty shapes
-        assert target["boxes"].shape == (0, 4)
-        assert target["labels"].shape == (0,)
-        assert target["masks"].shape == (0, 100, 100)
+        assert isinstance(sample, DenseSample)
+        assert sample.boxes.shape == (0, 4)
+        assert sample.labels.shape == (0,)
+        assert sample.instance_masks is not None
+        assert sample.instance_masks.shape == (0, 100, 100)
+        assert sample.instance_ids is not None
+        assert sample.instance_ids.shape == (0,)
 
     def test_getitem_with_transforms(self, temp_coco_data: tuple[str, str]) -> None:
         """Test __getitem__ with transforms applied."""
         image_dir, ann_path = temp_coco_data
 
-        # Define simple transform
         transforms = v2.Compose(
             [
                 v2.ToImage(),
@@ -317,20 +285,16 @@ class TestCocoDetectionV2:
             target_keys=["image_id", "boxes", "labels"],
         )
 
-        image, target = dataset[0]
+        sample = dataset[0]
 
-        # Check that image is transformed
-        assert isinstance(image, torch.Tensor)
-        assert image.shape == (3, 50, 50)  # CHW format, resized
-        assert image.dtype == torch.float32
-
-        # Check that bounding boxes are transformed
-        assert isinstance(target["boxes"], tv_tensors.BoundingBoxes)
+        assert sample.image.shape == (3, 50, 50)
+        assert sample.image.dtype == torch.float32
+        assert isinstance(sample.boxes, tv_tensors.BoundingBoxes)
 
     @pytest.mark.parametrize(
         "scale,expected_values",
         [
-            (0.5, torch.tensor([0, 1])),  # When downscaling, padding is used
+            (0.5, torch.tensor([0, 1])),
             (2.0, torch.tensor([0])),
         ],
     )
@@ -353,34 +317,28 @@ class TestCocoDetectionV2:
             target_keys=["image_id", "boxes", "labels", "masks", "padding_mask"],
             transforms=transforms,
         )
-        image, target = dataset[0]  # First image has 2 annotations
-        assert isinstance(image, torch.Tensor)
-        assert image.shape == (3, 256, 256)  # Resized by transform
-        assert image.dtype == torch.float32
-        assert isinstance(target, dict)
-        assert "image_id" in target
-        assert "boxes" in target
-        assert "labels" in target
-        assert "masks" in target
-        assert "padding_mask" in target
-        assert target["padding_mask"].shape == (1, 256, 256)
-        assert torch.equal(target["padding_mask"].unique(), expected_values)
+        sample = dataset[0]
+
+        assert sample.image.shape == (3, 256, 256)
+        assert sample.image.dtype == torch.float32
+        assert sample.instance_masks is not None
+        assert sample.padding_mask is not None
+        assert sample.padding_mask.shape == (1, 256, 256)
+        assert torch.equal(sample.padding_mask.unique(), expected_values)
 
     def test_bbox_format_conversion(self, temp_coco_data: tuple[str, str]) -> None:
         """Test that bounding boxes are correctly converted from XYWH to XYXY."""
         image_dir, ann_path = temp_coco_data
 
         dataset = CocoDetectionV2(
-            image_folder=image_dir, label_path=ann_path, target_keys=["boxes"]
+            image_folder=image_dir, label_path=ann_path, target_keys=["boxes", "labels"]
         )
 
-        _, target = dataset[0]  # First image has bbox [10, 10, 30, 30] in XYWH
+        sample = dataset[0]
 
-        boxes = target["boxes"]
+        boxes = sample.boxes
         assert isinstance(boxes, tv_tensors.BoundingBoxes)
 
-        # First box should be converted from [10, 10, 30, 30] XYWH to [10, 10, 40, 40]
-        # Second box should be converted from [50, 50, 20, 20] XYWH to [50, 50, 70, 70]
         expected_boxes = torch.tensor(
             [[10, 10, 40, 40], [50, 50, 70, 70]], dtype=torch.float32
         )
@@ -394,7 +352,6 @@ class TestLabelsGetter:
 
     def test_labels_getter_basic(self) -> None:
         """Test basic functionality of labels_getter."""
-        # Create sample data
         image = tv_tensors.Image(torch.rand(3, 100, 100))
         boxes = tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
             torch.tensor([[10, 10, 20, 20]]),
@@ -408,7 +365,6 @@ class TestLabelsGetter:
 
         sample = (image, target)
 
-        # Test labels_getter
         result_boxes, result_masks, result_labels = labels_getter(sample)  # pyright: ignore[reportArgumentType]
 
         assert torch.equal(result_boxes.data, boxes.data)
@@ -424,16 +380,13 @@ class TestCreateCocoDataloader:
         """Create temporary COCO dataset files for testing."""
         temp_dir = tempfile.mkdtemp()
 
-        # Create dummy images
         image_dir = os.path.join(temp_dir, "images")
         os.makedirs(image_dir)
 
-        # Create test images
         for i in range(3):
             img = Image.new("RGB", (100, 100), color=(255, 0, 0))
             img.save(os.path.join(image_dir, f"image_{i:03d}.jpg"))
 
-        # Create COCO annotations
         annotations = {
             "images": [
                 {"id": 1, "file_name": "image_000.jpg", "height": 100, "width": 100},
@@ -465,7 +418,6 @@ class TestCreateCocoDataloader:
             ],
         }
 
-        # Save annotations
         ann_path = os.path.join(temp_dir, "annotations.json")
         with open(ann_path, "w") as f:
             json.dump(annotations, f)
@@ -475,7 +427,7 @@ class TestCreateCocoDataloader:
     def test_create_coco_dataloader_basic(
         self, temp_coco_data: tuple[str, str]
     ) -> None:
-        """Test basic dataloader creation."""
+        """Default dataloader yields ``list[DenseSample]``."""
         image_dir, ann_path = temp_coco_data
 
         transforms = v2.Compose(
@@ -492,72 +444,16 @@ class TestCreateCocoDataloader:
             batch_size=2,
         )
 
-        # Test dataloader properties
         assert dataloader.batch_size == 2
-        # Note: shuffle property is not directly accessible on DataLoader
 
-        # Test getting a batch
         batch = next(iter(dataloader))
 
         assert isinstance(batch, list)
-        assert len(batch) == 2  # batch_size
+        assert len(batch) == 2
 
-        # Check each sample in batch
         for sample in batch:
-            assert isinstance(sample, dict)
-            assert "image" in sample
-            assert "image_id" in sample
-            assert "boxes" in sample
-            assert "labels" in sample
-            assert "masks" in sample
-
-            # Check tensor types
-            assert isinstance(sample["image"], torch.Tensor)
-            assert isinstance(sample["boxes"], torch.Tensor)
-            assert isinstance(sample["labels"], torch.Tensor)
-            assert isinstance(sample["masks"], torch.Tensor)
-
-    def test_coco_collate_fn(self, temp_coco_data: tuple[str, str]) -> None:
-        """Test the custom collate function."""
-        image_dir, ann_path = temp_coco_data
-
-        transforms = v2.Compose(
-            [
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-            ]
-        )
-
-        dataloader = create_coco_dataloader(
-            image_folder=image_dir,
-            label_path=ann_path,
-            transforms=transforms,
-            batch_size=1,
-        )
-
-        # Get the collate function
-        collate_fn = dataloader.collate_fn
-
-        # Create mock batch data
-        image = tv_tensors.Image(torch.rand(3, 100, 100))
-        target = {
-            "image_id": 1,
-            "boxes": torch.tensor([[10, 10, 20, 20]]),
-            "labels": torch.tensor([1]),
-            "masks": torch.ones(1, 100, 100),
-        }
-
-        batch = [(image, target)]
-
-        # Test collate function
-        result = collate_fn(batch)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-        sample = result[0]
-        assert "image" in sample
-        assert "image_id" in sample
-        assert "boxes" in sample
-        assert "labels" in sample
-        assert "masks" in sample
+            assert isinstance(sample, DenseSample)
+            assert sample.instance_masks is not None
+            assert sample.instance_ids is not None
+            assert sample.boxes.shape[0] == sample.labels.shape[0]
+            assert sample.instance_masks.shape[0] == sample.boxes.shape[0]

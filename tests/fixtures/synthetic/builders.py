@@ -46,6 +46,7 @@ def build_two_overlapping_things() -> DenseSample:
             boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(h, w)
         ),
         labels=labels,
+        instance_ids=torch.arange(2, dtype=torch.int32),
         instance_masks=InstanceMask(masks),
     )
 
@@ -56,6 +57,7 @@ def build_empty_instance() -> DenseSample:
     return DenseSample(
         image=_image(h, w, seed=1),
         **_empty_instance(h, w),
+        instance_ids=torch.zeros((0,), dtype=torch.int32),
         instance_masks=InstanceMask(torch.zeros((0, h, w), dtype=torch.bool)),
     )
 
@@ -103,6 +105,7 @@ def build_panoptic_stuff_and_things() -> DenseSample:
             boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(h, w)
         ),
         labels=labels,
+        instance_ids=torch.arange(2, dtype=torch.int32),
         instance_masks=InstanceMask(masks),
         semantic_map=SemanticMap(sem),
         panoptic_map=PanopticMap(pan),

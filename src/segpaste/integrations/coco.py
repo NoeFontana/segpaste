@@ -1,6 +1,6 @@
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torchvision
@@ -11,6 +11,7 @@ from torchvision.datasets import VisionDataset
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F
 
+from segpaste.types import DenseSample, InstanceMask
 from segpaste.types.data_structures import PaddingMask
 
 
@@ -80,7 +81,7 @@ class CocoDetectionV2(VisionDataset):
         target: list[dict[str, Any]] = self.coco.loadAnns(self.coco.getAnnIds([id]))
         return target
 
-    def __getitem__(self, index: int) -> tuple[Any, Any]:
+    def __getitem__(self, index: int) -> DenseSample:
         if not isinstance(index, int):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError(
                 f"Index must be of type integer, got {type(index)} instead."
@@ -153,7 +154,35 @@ class CocoDetectionV2(VisionDataset):
         if self.transforms is not None:
             image, target = self.transforms(image, target)
 
-        return image, target
+        labels_tensor = cast(torch.Tensor, target["labels"])
+        boxes_tv = cast(tv_tensors.BoundingBoxes, target["boxes"])
+
+        masks_val = target.get("masks")
+        if masks_val is not None:
+            instance_masks = InstanceMask(cast(torch.Tensor, masks_val).to(torch.bool))
+            instance_ids = torch.arange(labels_tensor.size(0), dtype=torch.int32)
+        else:
+            instance_masks = None
+            instance_ids = None
+
+        padding_mask_val = target.get("padding_mask")
+        padding_mask: PaddingMask | None = (
+            cast(PaddingMask, padding_mask_val)
+            if padding_mask_val is not None
+            else None
+        )
+
+        wrapped_image = (
+            image if isinstance(image, tv_tensors.Image) else tv_tensors.Image(image)
+        )
+        return DenseSample(
+            image=wrapped_image,
+            boxes=boxes_tv,
+            labels=labels_tensor,
+            instance_ids=instance_ids,
+            instance_masks=instance_masks,
+            padding_mask=padding_mask,
+        )
 
 
 def labels_getter(
@@ -166,25 +195,13 @@ def labels_getter(
     return (target["boxes"], target["masks"], target["labels"])  # pyright: ignore[reportReturnType]
 
 
-def add_image_collate_fn(
-    batch: list[tuple[tv_tensors.Image, dict[str, Any]]],
-) -> list[dict[str, torch.Tensor]]:
-    """Custom collate function to convert COCO annotations to expected format.
+def _identity_collate(batch: list[DenseSample]) -> list[DenseSample]:
+    """Default collate that passes ``list[DenseSample]`` through unchanged.
 
-    Converts a batch of (image, target) into a list of dictionaries
-        containing the 'image' and all target keys.
+    :class:`segpaste.augmentation.CopyPasteCollator` is the intended collator;
+    when absent, downstream code calls :meth:`BatchedDenseSample.from_samples`.
     """
-    samples: list[dict[str, torch.Tensor]] = []
-
-    for image, targets in batch:
-        sample = targets.copy()
-        sample.update(
-            {
-                "image": image,
-            }
-        )
-        samples.append(sample)
-    return samples
+    return batch
 
 
 def create_coco_dataloader(
@@ -192,8 +209,8 @@ def create_coco_dataloader(
     label_path: str,
     transforms: v2.Transform,
     batch_size: int = 4,
-    collate_fn: Any = add_image_collate_fn,
-) -> torch.utils.data.DataLoader[tuple[Any, Any]]:
+    collate_fn: Any = _identity_collate,
+) -> torch.utils.data.DataLoader[DenseSample]:
     """Create a COCO DataLoader preconfigured for segpaste pipelines.
 
     Args:
@@ -201,11 +218,12 @@ def create_coco_dataloader(
         label_path (str): Path to the COCO JSON annotations file.
         transforms (v2.Transform): Transform applied to each sample.
         batch_size (int): Batch size for the returned DataLoader.
-        collate_fn: Collate function; defaults to the module-level helper
-            that shapes each sample for torchvision.transforms.v2.
+        collate_fn: Collate function; defaults to an identity collate that
+            yields ``list[DenseSample]`` — wire :class:`CopyPasteCollator`
+            when copy-paste augmentation is desired.
 
     Returns:
-        A DataLoader yielding (image, target_dict) tuples.
+        A DataLoader yielding :class:`DenseSample` instances.
     """
 
     dataset = CocoDetectionV2(

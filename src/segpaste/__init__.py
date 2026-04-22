@@ -21,6 +21,7 @@ from segpaste.augmentation import (
 from segpaste.config import CopyPasteConfig
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
 from segpaste.types import (
+    BatchedDenseSample,
     CameraIntrinsics,
     DenseSample,
     InstanceMask,
@@ -34,6 +35,7 @@ from segpaste.types import (
 __version__: str = _pkg_version("segpaste")
 
 __all__ = [
+    "BatchedDenseSample",
     "CameraIntrinsics",
     "CocoDetectionV2",
     "CopyPasteAugmentation",

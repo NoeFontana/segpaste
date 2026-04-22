@@ -8,10 +8,11 @@ import fiftyone.zoo as foz
 import numpy as np
 import torch
 from PIL import Image
+from torchvision import tv_tensors
 
 from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.config import CopyPasteConfig
-from segpaste.types import DetectionTarget  # internal-only in 0.9.x; see ADR-0003
+from segpaste.types import DenseSample, InstanceMask
 
 
 def download_coco_dataset() -> fo.Dataset:
@@ -65,34 +66,33 @@ def visualize_coco_samples(num_samples: int = 50) -> None:
     session.wait(-1)
 
 
-def fiftyone_to_detection_target(sample: fo.Sample) -> DetectionTarget:
-    """Convert FiftyOne sample to DetectionTarget format."""
-    # Load image
+def fiftyone_to_dense_sample(sample: fo.Sample) -> DenseSample:
+    """Convert FiftyOne sample to :class:`DenseSample` format."""
     image_pil = Image.open(sample.filepath).convert("RGB")
     image_np = np.array(image_pil)
-    # Convert to tensor [C, H, W] format
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).float() / 255.0
+    h, w = image_tensor.shape[1], image_tensor.shape[2]
 
-    # Use segmentations field which contains masks
     if (
         not hasattr(sample, "segmentations")
         or not sample.segmentations
         or len(sample.segmentations.detections) == 0
     ):
-        # Empty detection target
-        h, w = image_tensor.shape[1], image_tensor.shape[2]
-        return DetectionTarget(
-            image=image_tensor,
-            boxes=torch.zeros((0, 4), dtype=torch.float32),
+        return DenseSample(
+            image=tv_tensors.Image(image_tensor),
+            boxes=tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+                torch.zeros((0, 4), dtype=torch.float32),
+                format=tv_tensors.BoundingBoxFormat.XYXY,
+                canvas_size=(h, w),
+            ),
             labels=torch.zeros(0, dtype=torch.long),
-            masks=torch.zeros((0, h, w), dtype=torch.float32),
+            instance_masks=InstanceMask(torch.zeros((0, h, w), dtype=torch.bool)),
+            instance_ids=torch.zeros(0, dtype=torch.int32),
         )
 
     boxes = []
     labels = []
     masks = []
-
-    h, w = image_tensor.shape[1], image_tensor.shape[2]
 
     for detection in sample.segmentations.detections:
         # Convert normalized bounding box to pixel coordinates
@@ -138,25 +138,35 @@ def fiftyone_to_detection_target(sample: fo.Sample) -> DetectionTarget:
             masks.append(mask)
         # Skip detections without masks
 
-    # Create final masks tensor
+    # Create final masks tensor (bool for InstanceMask)
     final_masks = (
-        torch.stack(masks) if masks else torch.zeros((0, h, w), dtype=torch.float32)
+        torch.stack(masks).to(torch.bool)
+        if masks
+        else torch.zeros((0, h, w), dtype=torch.bool)
     )
 
-    return DetectionTarget(
-        image=image_tensor,
-        boxes=torch.tensor(boxes, dtype=torch.float32),
+    boxes_tensor = torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+    n = boxes_tensor.size(0)
+
+    return DenseSample(
+        image=tv_tensors.Image(image_tensor),
+        boxes=tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+            boxes_tensor,
+            format=tv_tensors.BoundingBoxFormat.XYXY,
+            canvas_size=(h, w),
+        ),
         labels=torch.tensor(labels, dtype=torch.long),
-        masks=final_masks,
+        instance_masks=InstanceMask(final_masks),
+        instance_ids=torch.arange(n, dtype=torch.int32),
     )
 
 
-def detection_target_to_fiftyone(
-    target: DetectionTarget, original_filepath: str
-) -> fo.Sample:
-    """Convert DetectionTarget back to FiftyOne sample."""
-    # Convert image tensor back to PIL format
-    image_np = (target.image.permute(1, 2, 0) * 255.0).numpy().astype(np.uint8)
+def dense_sample_to_fiftyone(target: DenseSample, original_filepath: str) -> fo.Sample:
+    """Convert :class:`DenseSample` back to FiftyOne sample."""
+    if target.instance_masks is None:
+        raise ValueError("dense_sample_to_fiftyone requires INSTANCE modality")
+    image_tensor = target.image.as_subclass(torch.Tensor)
+    image_np = (image_tensor.permute(1, 2, 0) * 255.0).numpy().astype(np.uint8)
     image_pil = Image.fromarray(image_np)
 
     # Save to temporary file (in practice, you'd want to manage this better)
@@ -173,10 +183,11 @@ def detection_target_to_fiftyone(
     segmentations = []
     h, w = target.image.shape[1], target.image.shape[2]
 
+    masks_tensor = target.instance_masks.as_subclass(torch.Tensor)
     for i in range(len(target.boxes)):
         box = target.boxes[i]
         label = target.labels[i].item()
-        mask = target.masks[i]
+        mask = masks_tensor[i]
 
         # Convert pixel coordinates back to normalized
         x1, y1, x2, y2 = box.tolist()
@@ -252,31 +263,31 @@ def create_copy_paste_augmentation(num_samples: int = 20) -> None:
 
     augmented_dataset = fo.Dataset("coco-copy-paste-augmented", overwrite=True)
 
-    logging.getLogger().info("Converting FiftyOne samples to DetectionTarget format...")
+    logging.getLogger().info("Converting FiftyOne samples to DenseSample format...")
 
-    # Convert all samples to DetectionTarget format
-    detection_targets = []
+    # Convert all samples to DenseSample format
+    dense_samples: list[tuple[DenseSample, str]] = []
     for sample in samples_list:
         try:
-            target = fiftyone_to_detection_target(sample)
-            detection_targets.append((target, sample.filepath))
+            target = fiftyone_to_dense_sample(sample)
+            dense_samples.append((target, sample.filepath))
         except Exception as e:
             msg = f"Failed to convert sample {sample.filepath}: {e}"
             logging.getLogger().warning(msg)
             continue
 
-    if len(detection_targets) < 2:
+    if len(dense_samples) < 2:
         msg = "Need at least 2 valid samples for copy-paste augmentation"
         logging.getLogger().error(msg)
         return
 
-    msg = f"Applying copy-paste augmentation to {len(detection_targets)} samples..."
+    msg = f"Applying copy-paste augmentation to {len(dense_samples)} samples..."
     logging.getLogger().info(msg)
 
     # Apply copy-paste augmentation
-    for i in range(0, len(detection_targets) - 1, 2):
-        target_data, target_filepath = detection_targets[i]
-        source_data, _ = detection_targets[i + 1]
+    for i in range(0, len(dense_samples) - 1, 2):
+        target_data, target_filepath = dense_samples[i]
+        source_data, _ = dense_samples[i + 1]
 
         # Create source objects list (other samples that can be used for pasting)
         source_objects = [source_data]
@@ -286,7 +297,7 @@ def create_copy_paste_augmentation(num_samples: int = 20) -> None:
             augmented_target = copy_paste_aug.transform(target_data, source_objects)
 
             # Convert back to FiftyOne format
-            augmented_sample = detection_target_to_fiftyone(
+            augmented_sample = dense_sample_to_fiftyone(
                 augmented_target, target_filepath
             )
             augmented_dataset.add_sample(augmented_sample)

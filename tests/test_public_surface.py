@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 import segpaste
 
 # Pinned public surface. Any drift fails this test. Amendments require an
 # ADR update; see ADR-0001 Part (i) and ADR-0003.
 _EXPECTED_PUBLIC_API: tuple[str, ...] = (
+    "BatchedDenseSample",
     "CameraIntrinsics",
     "CocoDetectionV2",
     "CopyPasteAugmentation",
@@ -91,16 +90,8 @@ def test_detection_target_not_public() -> None:
     assert not hasattr(segpaste, "DetectionTarget")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ADR-0003: DetectionTarget is scheduled for removal in 0.9.1. "
-        "Expected to flip green when P1's W1 workstream migrates the "
-        "augmentation pipeline to DenseSample and deletes the class."
-    ),
-)
 def test_detection_target_removed_from_types_by_0_9_1() -> None:
-    """Pinned failure asserting complete removal in 0.9.1."""
+    """ADR-0003: ``DetectionTarget`` is fully deleted in 0.9.1."""
     from segpaste import types
 
     assert not hasattr(types, "DetectionTarget")
