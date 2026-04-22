@@ -34,9 +34,14 @@ class TestConfigValidation:
             CopyPasteConfig(scale_range=(2.0, 0.5))
 
     def test_invalid_blend_mode(self) -> None:
-        """Test invalid blend mode raises ValidationError."""
-        with pytest.raises(ValidationError):
-            CopyPasteConfig(blend_mode="invalid")  # pyright: ignore[reportArgumentType]
+        """Non-"alpha" blend modes raise ValidationError.
+
+        Covers the "gaussian"/"poisson" names reserved by ADR-0001 Part (i):
+        the Literal must stay tight until an ADR amendment wires them.
+        """
+        for rejected in ("invalid", "gaussian", "poisson"):
+            with pytest.raises(ValidationError):
+                CopyPasteConfig(blend_mode=rejected)  # pyright: ignore[reportArgumentType]
 
     def test_valid_config(self) -> None:
         """Test valid configuration."""
@@ -45,13 +50,13 @@ class TestConfigValidation:
             min_paste_objects=2,
             max_paste_objects=5,
             scale_range=(0.8, 1.2),
-            blend_mode="gaussian",
+            blend_mode="alpha",
         )
         assert config.paste_probability == 0.8
         assert config.min_paste_objects == 2
         assert config.max_paste_objects == 5
         assert config.scale_range == (0.8, 1.2)
-        assert config.blend_mode == "gaussian"
+        assert config.blend_mode == "alpha"
 
     def test_forbid_extra_fields(self) -> None:
         """Test that unknown arguments raise ValidationError."""

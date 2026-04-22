@@ -14,24 +14,6 @@ from segpaste.types.type_aliases import (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class BoundingBox:
-    """Bounding box in xyxy format (x1, y1, x2, y2)."""
-
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-
-    @skip_if_compiling
-    def __post_init__(self) -> None:
-        """Validate bounding box coordinates."""
-        if self.x1 >= self.x2:
-            raise ValueError("x1 must be < x2")
-        if self.y1 >= self.y2:
-            raise ValueError("y1 must be < y2")
-
-
 class PaddingMask(Mask):
     """Unlike tv_tensor.Mask, PaddingMask is not associated with any object.
 

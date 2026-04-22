@@ -30,7 +30,29 @@ jobs:
             # Check that basic features work and we didn't miss to include crucial files
             - name: Smoke test (wheel)
               run: uv run --isolated --no-project --with dist/*.whl --with pytest --with pytest-cov pytest tests
+            - name: Public-surface smoke test (wheel)
+              run: |
+                uv run --isolated --no-project --with dist/*.whl python -c "
+                import importlib.resources as r
+                import segpaste
+                assert (r.files('segpaste') / 'py.typed').is_file(), 'py.typed missing from wheel'
+                assert 'CopyPasteTransform' not in dir(segpaste), 'CopyPasteTransform leaked'
+                assert 'DetectionTarget' not in dir(segpaste), 'DetectionTarget leaked'
+                assert segpaste.__version__, '__version__ empty'
+                print('wheel public surface OK, __version__=' + segpaste.__version__)
+                "
             - name: Smoke test (source distribution)
               run: uv run --isolated --no-project --with dist/*.tar.gz --with pytest --with pytest-cov pytest tests
+            - name: Public-surface smoke test (sdist)
+              run: |
+                uv run --isolated --no-project --with dist/*.tar.gz python -c "
+                import importlib.resources as r
+                import segpaste
+                assert (r.files('segpaste') / 'py.typed').is_file(), 'py.typed missing from sdist build'
+                assert 'CopyPasteTransform' not in dir(segpaste), 'CopyPasteTransform leaked'
+                assert 'DetectionTarget' not in dir(segpaste), 'DetectionTarget leaked'
+                assert segpaste.__version__, '__version__ empty'
+                print('sdist public surface OK, __version__=' + segpaste.__version__)
+                "
             - name: Publish
               run: uv publish

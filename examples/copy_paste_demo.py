@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Demonstration of copy-paste augmentation functionality."""
+"""Demonstration of copy-paste augmentation functionality.
+
+Uses `DetectionTarget` (internal-only in 0.9.x; see ADR-0003). External
+consumers should migrate to `DenseSample` via `DenseSample.from_detection_target`.
+"""
 
 import argparse
 import logging
