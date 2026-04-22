@@ -4,10 +4,10 @@
 | ---------- | ---------------------------------------------------- |
 | Number     | 0001                                                 |
 | Title      | Dense-sample composites (instance, panoptic, semantic, depth, normals) |
-| Status     | Accepted                                             |
+| Status     | Superseded in part by [ADR-0003](0003-hard-deprecation-stance.md) — Part (i) deprecation policy only; invariants (Part ii), type-system decisions (Part iii), and seed policy (Part iv) remain in force |
 | Author     | @NoeFontana                                          |
 | Created    | 2026-04-20                                           |
-| Updated    | 2026-04-20                                           |
+| Updated    | 2026-04-21                                           |
 | Tag        | `ADR-0001`                                           |
 
 Every Phase 1 (P1) change that touches a symbol, invariant, or field pinned

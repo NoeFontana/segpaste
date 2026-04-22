@@ -11,7 +11,7 @@ from PIL import Image
 
 from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.config import CopyPasteConfig
-from segpaste.types import DetectionTarget
+from segpaste.types import DetectionTarget  # internal-only in 0.9.x; see ADR-0003
 
 
 def download_coco_dataset() -> fo.Dataset:

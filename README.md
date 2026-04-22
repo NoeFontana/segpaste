@@ -48,9 +48,7 @@ torch.utils.data.DataLoader(
 
 Examples of usage can be found in the test suite.
 
-### Transform (Unstable API)
-
-A minimal working example with `CopyPasteTransform` can be found in the [examples](https://github.com/NoeFontana/segpaste/tree/main/examples).
+End-to-end examples of wiring `CopyPasteCollator` into a `DataLoader` can be found in the [examples](https://github.com/NoeFontana/segpaste/tree/main/examples).
 
 ### Further
 

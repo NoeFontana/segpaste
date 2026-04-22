@@ -7,12 +7,11 @@ from segpaste.augmentation.lsj import (
     SanitizeBoundingBoxes,
     make_large_scale_jittering,
 )
-from segpaste.augmentation.torchvision import CopyPasteCollator, CopyPasteTransform
+from segpaste.augmentation.torchvision import CopyPasteCollator
 
 __all__ = [
     "CopyPasteAugmentation",
     "CopyPasteCollator",
-    "CopyPasteTransform",
     "FixedSizeCrop",
     "RandomResize",
     "SanitizeBoundingBoxes",

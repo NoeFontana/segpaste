@@ -153,19 +153,30 @@ markers = [
     "invariant: ADR-0001 per-modality invariant check (see tests/test_invariant_matrix.py)",
 ]
 
+[tool.coverage.report]
+# Ratchet floor. Measured 81–83% on the P0.E post-deletion baseline; 80 leaves
+# a sliver of headroom for Hypothesis-driven coverage noise. Raise only when
+# the observed floor moves up — never pin aspirationally.
+fail_under = 80
+skip_covered = false
+show_missing = true
+
 [tool.pyright]
 include = ["src", "tests", "examples", "benchmarks"]
 pythonVersion = "3.11"
 pythonPlatform = "Linux"
 typeCheckingMode = "strict"
-# torchvision, fiftyone, and faster_coco_eval don't ship type stubs.
+# torchvision, fiftyone, and faster_coco_eval don't ship complete type stubs.
 # Pyright falls back to source-level inference via useLibraryCodeForTypes
 # (default true), but partial inference surfaces as the reports below.
-# Downgrading these is the pyright-side equivalent of mypy's
-# `[[tool.mypy.overrides]] ignore_missing_imports = true` — they only
-# fire when pyright can't fully type a symbol, which in this project is
-# effectively isolated to those three libraries.
-reportMissingTypeStubs = "none"
-reportUnknownMemberType = "none"
-reportUnknownArgumentType = "none"
-reportUnknownVariableType = "none"
+#
+# P0.E audit (ADR-0001 Part (i)): every first-party hit for these rules, when
+# enabled, comes from a line calling into torchvision | fiftyone |
+# faster_coco_eval. We tighten from "none" to "warning": pyright still emits
+# them for dev visibility (useful signal if a stub appears upstream), but CI's
+# `uv run pyright` exits 0 on warnings so there is no regression risk. Promote
+# back to "error" in a follow-up ADR once the relevant stubs land.
+reportMissingTypeStubs = "warning"
+reportUnknownMemberType = "warning"
+reportUnknownArgumentType = "warning"
+reportUnknownVariableType = "warning"

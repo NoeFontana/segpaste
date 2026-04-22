@@ -1,5 +1,7 @@
-# Import main functionality here
+# Public top-level surface. Pinned by `tests/test_public_surface.py`; adding
+# or removing a name here without amending ADR-0001 / ADR-0003 fails CI.
 import logging
+from importlib.metadata import version as _pkg_version
 
 try:
     import faster_coco_eval as _faster_coco_eval
@@ -7,22 +9,20 @@ try:
     _faster_coco_eval.init_as_pycocotools()
 except ImportError:
     logging.getLogger(__file__).warning("faster_coco_eval not found.")
-    pass
+
 from segpaste.augmentation import (
     CopyPasteAugmentation,
     CopyPasteCollator,
-    CopyPasteTransform,
     FixedSizeCrop,
     RandomResize,
     SanitizeBoundingBoxes,
     make_large_scale_jittering,
 )
 from segpaste.config import CopyPasteConfig
-from segpaste.integrations import CocoDetectionV2
+from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
 from segpaste.types import (
     CameraIntrinsics,
     DenseSample,
-    DetectionTarget,
     InstanceMask,
     Modality,
     PaddingMask,
@@ -31,15 +31,15 @@ from segpaste.types import (
     SemanticMap,
 )
 
+__version__: str = _pkg_version("segpaste")
+
 __all__ = [
     "CameraIntrinsics",
     "CocoDetectionV2",
     "CopyPasteAugmentation",
     "CopyPasteCollator",
     "CopyPasteConfig",
-    "CopyPasteTransform",
     "DenseSample",
-    "DetectionTarget",
     "FixedSizeCrop",
     "InstanceMask",
     "Modality",
@@ -49,5 +49,7 @@ __all__ = [
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SemanticMap",
+    "__version__",
+    "create_coco_dataloader",
     "make_large_scale_jittering",
 ]

@@ -18,8 +18,9 @@ class CopyPasteConfig(BaseModel):
     max_paste_objects: int = Field(default=5, ge=0)
 
     scale_range: tuple[float, float] = (0.5, 2.0)
-    # Blending mode for pasted objects
-    blend_mode: Literal["alpha", "gaussian", "poisson"] = "alpha"
+    # ADR-0001 Part (i): "gaussian" and "poisson" are reserved for a
+    # follow-up ADR; until then only "alpha" is wired.
+    blend_mode: Literal["alpha"] = "alpha"
 
     # Min edge length of pasted objects after scaling
     # Bounding boxes with smaller edges will be skipped

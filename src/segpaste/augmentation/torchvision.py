@@ -9,66 +9,6 @@ from segpaste.augmentation import CopyPasteAugmentation
 from segpaste.types import DetectionTarget
 
 
-class CopyPasteTransform(torch.nn.Module):
-    """PyTorch Transform wrapper for copy-paste augmentation.
-
-    This transform can be used in torchvision transform pipelines.
-    It expects input data in a dictionary format with keys:
-    - 'image': torch.Tensor of shape [C, H, W]
-    - 'boxes': torch.Tensor of shape [N, 4] in xyxy format
-    - 'labels': torch.Tensor of shape [N]
-    - 'masks': torch.Tensor of shape [N, H, W]
-    """
-
-    def __init__(
-        self,
-        source_objects: list[DetectionTarget],
-        augmentation: CopyPasteAugmentation,
-    ) -> None:
-        """Initialize copy-paste transform.
-
-        Args:
-            source_objects: List of objects that can be pasted
-            augmentation: Copy-paste augmentation instance
-        """
-        super().__init__()
-        self.copy_paste: CopyPasteAugmentation = augmentation
-        self.source_objects: list[DetectionTarget] = source_objects
-
-    def forward(self, sample: dict[str, Any]) -> dict[str, DetectionTarget.TYPES]:
-        """Apply copy-paste augmentation to sample.
-
-        Args:
-            sample: Dictionary containing image and annotations
-
-        Returns:
-            Augmented sample dictionary
-        """
-
-        # Apply copy-paste
-        augmented = self.copy_paste.transform(
-            DetectionTarget.from_dict(sample), self.source_objects
-        )
-
-        # Convert back to dictionary
-        result = augmented.to_dict()
-
-        # Copy any additional keys from original sample
-        for key, value in sample.items():
-            if key not in result:
-                result[key] = value
-
-        return result
-
-    def __repr__(self) -> str:
-        """Return string representation of transform."""
-        return (
-            f"{self.__class__.__name__}("
-            f"num_source_objects={len(self.source_objects)}, "
-            f"config={self.copy_paste.config})"
-        )
-
-
 class CopyPasteCollator:
     """Collate function for batching data with copy-paste augmentation.
 

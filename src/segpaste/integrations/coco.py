@@ -194,15 +194,18 @@ def create_coco_dataloader(
     batch_size: int = 4,
     collate_fn: Any = add_image_collate_fn,
 ) -> torch.utils.data.DataLoader[tuple[Any, Any]]:
-    """Create COCO dataset and dataloader for testing.
+    """Create a COCO DataLoader preconfigured for segpaste pipelines.
 
     Args:
-        dataset_path: Path to COCO dataset directory
-        batch_size: Batch size for dataloader
-        collate_fn: Collate function for dataloader
+        image_folder (str): Directory containing the COCO image files.
+        label_path (str): Path to the COCO JSON annotations file.
+        transforms (v2.Transform): Transform applied to each sample.
+        batch_size (int): Batch size for the returned DataLoader.
+        collate_fn: Collate function; defaults to the module-level helper
+            that shapes each sample for torchvision.transforms.v2.
 
     Returns:
-        DataLoader for COCO dataset
+        A DataLoader yielding (image, target_dict) tuples.
     """
 
     dataset = CocoDetectionV2(
