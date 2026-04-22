@@ -3,10 +3,10 @@
 Sole source of truth for the workload shape pinned in ADR-0002.
 """
 
-from typing import Any
-
 import torch
 from torchvision import tv_tensors
+
+from segpaste.types import DenseSample, InstanceMask
 
 
 def build_batch(
@@ -14,18 +14,17 @@ def build_batch(
     batch_size: int = 8,
     img_size: int = 1024,
     k_range: tuple[int, int] = (1, 5),
-) -> list[tuple[tv_tensors.Image, dict[str, Any]]]:
+) -> list[DenseSample]:
     """Build one synthetic batch shaped for `CopyPasteCollator.__call__`.
 
-    Each sample carries a uint8 image and a target dict with `boxes`, `labels`,
-    and `masks`. `k` objects per sample are drawn uniformly from
-    `[k_range[0], k_range[1]]` (inclusive). Masks are the interior of each box
-    (bool), which guarantees `area >= min_object_area=1` for the canonical
-    benchmark config.
+    Each sample is a :class:`DenseSample` in INSTANCE modality. ``k`` objects
+    per sample are drawn uniformly from ``[k_range[0], k_range[1]]``
+    (inclusive). Masks are the interior of each box (bool), which guarantees
+    ``area >= min_object_area=1`` for the canonical benchmark config.
     """
     g = torch.Generator().manual_seed(seed)
     k_lo, k_hi = k_range
-    batch: list[tuple[tv_tensors.Image, dict[str, Any]]] = []
+    batch: list[DenseSample] = []
 
     for i in range(batch_size):
         gi = torch.Generator().manual_seed(seed * 8191 + i)
@@ -57,11 +56,14 @@ def build_batch(
         for j in range(k):
             masks[j, int(y1[j]) : int(y2[j]), int(x1[j]) : int(x2[j])] = True
 
-        target: dict[str, Any] = {
-            "boxes": boxes,
-            "labels": labels,
-            "masks": masks,
-        }
-        batch.append((image, target))
+        batch.append(
+            DenseSample(
+                image=image,
+                boxes=boxes,
+                labels=labels,
+                instance_masks=InstanceMask(masks),
+                instance_ids=torch.arange(k, dtype=torch.int32),
+            )
+        )
 
     return batch

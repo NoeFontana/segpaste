@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 import torchvision
+from torchvision import tv_tensors
 from torchvision.transforms import v2
 
 from segpaste.augmentation import (
@@ -19,87 +20,88 @@ from segpaste.augmentation import (
 from segpaste.config import CopyPasteConfig
 from segpaste.integrations import create_coco_dataloader
 from segpaste.processing import boxes_to_masks
-from segpaste.types import DetectionTarget
+from segpaste.types import BatchedDenseSample, DenseSample, InstanceMask
 from tests.shared import (
     generate_resize_transform_strategy,
     generate_scale_jitter_transform_strategy,
 )
 
 
-def create_sample_detection_target(
+def create_sample_dense_sample(
     num_objects: int = 2, image_size: tuple[int, int, int] = (3, 224, 224)
-) -> DetectionTarget:
-    """Create a sample detection target for testing."""
+) -> DenseSample:
+    """Create a sample DenseSample (INSTANCE modality) for testing."""
     c, h, w = image_size
 
-    # Create dummy image
     image = torch.rand(c, h, w)
+    raw_boxes = torch.tensor(
+        [[10, 10, 50, 50], [100, 100, 140, 140]], dtype=torch.float32
+    )[:num_objects]
+    labels = torch.tensor([1, 2], dtype=torch.int64)[:num_objects]
 
-    # Create dummy boxes
-    boxes = torch.tensor([[10, 10, 50, 50], [100, 100, 140, 140]])[:num_objects]
-
-    # Create dummy labels
-    labels = torch.tensor([1, 2])[:num_objects]
-
-    # Create dummy masks
-    masks = torch.zeros(num_objects, h, w)
-    for i, box in enumerate(boxes):
+    masks = torch.zeros(num_objects, h, w, dtype=torch.bool)
+    for i, box in enumerate(raw_boxes):
         x1, y1, x2, y2 = box.int()
-        masks[i, y1:y2, x1:x2] = 1.0
+        masks[i, y1:y2, x1:x2] = True
 
-    return DetectionTarget(image=image, boxes=boxes, labels=labels, masks=masks)
+    return DenseSample(
+        image=tv_tensors.Image(image),
+        boxes=tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+            raw_boxes, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(h, w)
+        ),
+        labels=labels,
+        instance_ids=torch.arange(num_objects, dtype=torch.int32),
+        instance_masks=InstanceMask(masks),
+    )
+
+
+def _masks_tensor(sample: DenseSample) -> torch.Tensor:
+    assert sample.instance_masks is not None
+    return sample.instance_masks.as_subclass(torch.Tensor)
 
 
 class TestCopyPasteAugmentation:
     """Test cases for CopyPasteAugmentation."""
 
     def test_copy_paste_with_probability_0(self) -> None:
-        """Test that no augmentation is applied when probability is 0."""
+        """No augmentation is applied when probability is 0."""
         config = CopyPasteConfig(paste_probability=0.0)
         augmentation = CopyPasteAugmentation(config)
 
-        target_data = create_sample_detection_target()
-        source_objects = [create_sample_detection_target(num_objects=1)]
+        target_data = create_sample_dense_sample()
+        source_objects = [create_sample_dense_sample(num_objects=1)]
 
         result = augmentation.transform(target_data, source_objects)
 
-        # Should return original data unchanged
-        assert torch.equal(result.image, target_data.image)
-        assert torch.equal(result.boxes, target_data.boxes)
-        assert torch.equal(result.labels, target_data.labels)
-        assert torch.equal(result.masks, target_data.masks)
+        assert result is target_data
 
     def test_copy_paste_with_probability_1(self) -> None:
-        """Test that augmentation is applied when probability is 1."""
+        """Augmentation runs when probability is 1 and never loses objects."""
         config = CopyPasteConfig(
             paste_probability=1.0, max_paste_objects=1, min_paste_objects=1
         )
         augmentation = CopyPasteAugmentation(config)
 
-        target_data = create_sample_detection_target()
-        source_objects = [create_sample_detection_target(num_objects=1)]
+        target_data = create_sample_dense_sample()
+        source_objects = [create_sample_dense_sample(num_objects=1)]
 
         result = augmentation.transform(target_data, source_objects)
+        assert result.instance_masks is not None
 
-        # Should have more objects than original
         assert result.boxes.shape[0] >= target_data.boxes.shape[0]
         assert result.labels.shape[0] >= target_data.labels.shape[0]
-        assert result.masks.shape[0] >= target_data.masks.shape[0]
+        assert _masks_tensor(result).shape[0] >= _masks_tensor(target_data).shape[0]
 
     def test_copy_paste_empty_source_objects(self) -> None:
-        """Test behavior with empty source objects."""
+        """Behavior with empty source objects — returns target unchanged."""
         augmentation = CopyPasteAugmentation(CopyPasteConfig())
 
-        target_data = create_sample_detection_target()
-        source_objects: list[DetectionTarget] = []
+        target_data = create_sample_dense_sample()
+        source_objects: list[DenseSample] = []
 
         result = augmentation.transform(target_data, source_objects)
 
-        # Should return original data unchanged
-        assert torch.equal(result.image, target_data.image)
-        assert torch.equal(result.boxes, target_data.boxes)
-        assert torch.equal(result.labels, target_data.labels)
-        assert torch.equal(result.masks, target_data.masks)
+        assert result is target_data
 
 
 class TestUtils:
@@ -116,24 +118,6 @@ class TestUtils:
         assert masks[1, 30:40, 30:40].sum() == 100  # 10x10 box
 
 
-class TestDetectionTarget:
-    """Test cases for DetectionTarget data structure."""
-
-    def test_detection_target_creation(self) -> None:
-        """Test DetectionTarget creation and access."""
-        image = torch.rand(3, 224, 224)
-        boxes = torch.tensor([[10, 10, 50, 50]])
-        labels = torch.tensor([1])
-        masks = torch.zeros(1, 224, 224)
-
-        target = DetectionTarget(image=image, boxes=boxes, labels=labels, masks=masks)
-
-        assert torch.equal(target.image, image)
-        assert torch.equal(target.boxes, boxes)
-        assert torch.equal(target.labels, labels)
-        assert torch.equal(target.masks, masks)
-
-
 class TestCopyPasteCollator:
     """Test cases for CopyPasteCollator."""
 
@@ -145,12 +129,31 @@ class TestCopyPasteCollator:
         assert collator.copy_paste.config.paste_probability == 0.8
 
     def test_collator_empty_batch(self) -> None:
-        """Test collator with empty batch."""
+        """Empty batch yields an empty :class:`BatchedDenseSample`."""
         config = CopyPasteConfig()
         collator = CopyPasteCollator(CopyPasteAugmentation(config))
 
         result = collator([])
-        assert result == {}
+        assert isinstance(result, BatchedDenseSample)
+        assert result.batch_size == 0
+
+    def test_collator_small_batch(self) -> None:
+        """Two-sample batch — paste runs, BatchedDenseSample is well-formed."""
+        config = CopyPasteConfig(
+            paste_probability=1.0,
+            max_paste_objects=1,
+            min_paste_objects=1,
+        )
+        collator = CopyPasteCollator(CopyPasteAugmentation(config))
+        batch = [create_sample_dense_sample(), create_sample_dense_sample()]
+        result = collator(batch)
+
+        assert isinstance(result, BatchedDenseSample)
+        assert result.batch_size == 2
+        assert result.instance_masks is not None
+        assert result.instance_ids is not None
+        assert len(result.boxes) == 2
+        assert len(result.labels) == 2
 
     @pytest.mark.parametrize(
         "transforms",
@@ -163,16 +166,13 @@ class TestCopyPasteCollator:
         self, transforms: v2.Transform, tmp_path: Path
     ) -> None:
         """Test CopyPasteCollator with real COCO dataset."""
-        # Set random seeds for reproducibility
         torch.manual_seed(42)
         np.random.seed(42)
         random.seed(42)
 
-        # Default COCO dataset path
         default_path: Path = Path.home() / "fiftyone" / "coco-2017" / "validation"
         dataset_path: str = os.environ.get("COCO_DATASET_PATH", str(default_path))
 
-        # Check if dataset exists
         val_images_path: str = os.path.join(dataset_path, "data")
         annotations_path: str = os.path.join(dataset_path, "labels.json")
 
@@ -183,7 +183,7 @@ class TestCopyPasteCollator:
             logging.getLogger().info(f"Images will be saved to {tmp_path}")
 
         config: CopyPasteConfig = CopyPasteConfig(
-            paste_probability=1.0,  # Always apply for testing
+            paste_probability=1.0,
             max_paste_objects=20,
             min_paste_objects=5,
             scale_range=(0.5, 2.0),
@@ -198,44 +198,21 @@ class TestCopyPasteCollator:
             collate_fn=collator,
         )
 
-        # Get a batch of samples
-        for i, samples in enumerate(itertools.islice(dataloader, 2)):
+        for i, batched in enumerate(itertools.islice(dataloader, 2)):
             if os.environ.get("SAVE_TEST_IMAGES", "0") == "1":
                 torchvision.utils.save_image(
-                    samples["images"],
+                    batched.images.as_subclass(torch.Tensor),
                     f"{tmp_path}/pasted_image_{i}.png",
                     nrow=4,
                 )
 
-            # Verify collated batch structure
-            assert "images" in samples
-            assert "boxes" in samples
-            assert "labels" in samples
-            assert "masks" in samples
-            assert "padding_mask" in samples or all(
-                sample.get("padding_mask") is None for sample in samples["masks"]
-            )
-
-            # Check batch dimensions
-            assert isinstance(samples["images"], torch.Tensor)
-
-            # Check that boxes, labels, and masks are lists
-            assert isinstance(samples["boxes"], list)
-            assert isinstance(samples["labels"], list)
-            assert isinstance(samples["masks"], list)
-
-            assert isinstance(samples.get("padding_mask"), torch.Tensor | type(None))
-
-            # Verify each sample in batch
-            for i in range(len(samples["boxes"])):
-                boxes = samples["boxes"][i]
-                labels = samples["labels"][i]
-                masks = samples["masks"][i]
-
-                assert isinstance(boxes, torch.Tensor)
-                assert isinstance(labels, torch.Tensor)
-                assert isinstance(masks, torch.Tensor)
-
-                # Check tensor shapes are consistent
-                assert boxes.shape[0] == labels.shape[0] == masks.shape[0]
-                assert boxes.shape[1] == 4  # xyxy format
+            assert isinstance(batched, BatchedDenseSample)
+            assert batched.batch_size == 4
+            assert batched.instance_masks is not None
+            assert batched.instance_ids is not None
+            for boxes_i, labels_i, masks_i in zip(
+                batched.boxes, batched.labels, batched.instance_masks, strict=True
+            ):
+                assert boxes_i.shape[0] == labels_i.shape[0]
+                assert boxes_i.shape[0] == masks_i.shape[0]
+                assert boxes_i.shape[1] == 4

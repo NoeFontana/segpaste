@@ -1,117 +1,39 @@
 """PyTorch transforms for copy-paste augmentation."""
 
-from typing import Any
-
-import torch
-from torchvision import tv_tensors
-
 from segpaste.augmentation import CopyPasteAugmentation
-from segpaste.types import DetectionTarget
+from segpaste.types import BatchedDenseSample, DenseSample
 
 
 class CopyPasteCollator:
     """Collate function for batching data with copy-paste augmentation.
 
-    This collator applies copy-paste augmentation at batch time,
-    allowing objects from different images in the batch to be used
-    as source objects for pasting.
+    Consumes ``list[DenseSample]`` and produces a :class:`BatchedDenseSample`.
+    Every sample in the batch acts as a source for every other sample; target
+    exclusion is performed by index rather than image-identity comparison.
     """
 
     def __init__(self, augmentation: CopyPasteAugmentation) -> None:
         """Initialize copy-paste collator.
 
         Args:
-            augmentation: Copy-paste augmentation instance
+            augmentation: Copy-paste augmentation instance.
         """
         self.copy_paste: CopyPasteAugmentation = augmentation
 
-    def __call__(
-        self, batch: list[tuple[tv_tensors.Image, dict[str, Any]]]
-    ) -> dict[str, torch.Tensor | list[torch.Tensor]]:
-        """Collate batch with copy-paste augmentation.
+    def __call__(self, batch: list[DenseSample]) -> BatchedDenseSample:
+        """Apply copy-paste augmentation across the batch and stack the result.
 
-        Args:
-            batch: List of sample dictionaries
-
-        Returns:
-            Collated batch dictionary.
-            Keys: "images", "boxes", "labels", "masks" and optionally "padding_mask".
+        For each sample ``i``, the remaining samples ``[j for j != i]`` act as
+        source objects. Empty batches return an empty :class:`BatchedDenseSample`
+        (``batch_size == 0``).
         """
         if not batch:
-            return {}
+            return BatchedDenseSample.from_samples([])
 
-        # Extract all objects from batch as potential source objects
-        all_objects: list[DetectionTarget] = []
-        for image, target in batch:
-            target["image"] = image
-
-            # TODO: Revisit. It's wasteful to create separate DetectionTargets.
-            if "masks" in target and target["masks"] is not None:
-                num_objects: int = target["masks"].shape[0]
-                for i in range(num_objects):
-                    obj: DetectionTarget = DetectionTarget(
-                        image=target["image"],
-                        boxes=target["boxes"][i : i + 1],
-                        labels=target["labels"][i : i + 1],
-                        masks=target["masks"][i : i + 1],
-                        padding_mask=target.get("padding_mask"),
-                    )
-                    all_objects.append(obj)
-
-        # Apply copy-paste to each sample
-        augmented_samples: list[dict[str, Any]] = []
-        for _, target in batch:
-            target_data: DetectionTarget = DetectionTarget.from_dict(target)
-
-            # Use other objects in batch as source objects
-            source_objects: list[DetectionTarget] = [
-                obj
-                for obj in all_objects
-                if not torch.equal(obj.image, target_data.image)
-            ]
-
-            if source_objects:
-                augmented: DetectionTarget = self.copy_paste.transform(
-                    target_data, source_objects
-                )
-                augmented_sample: dict[str, DetectionTarget.TYPES] = augmented.to_dict()
-                # Copy additional keys
-                for key, value in target.items():
-                    if key not in augmented_sample:
-                        augmented_sample[key] = value
-
-                augmented_samples.append(augmented_sample)
-            else:
-                augmented_samples.append(target)
-
-        # Standard collation
-        return self._collate_samples(augmented_samples)
-
-    def _collate_samples(
-        self, samples: list[dict[str, Any]]
-    ) -> dict[str, torch.Tensor | list[torch.Tensor]]:
-        """Collate list of samples into batch tensors.
-
-        Args:
-            samples: List of sample dictionaries
-
-        Returns:
-            Collated batch dictionary
-        """
-        if not samples:
-            return {}
-
-        batch: dict[str, torch.Tensor | list[torch.Tensor]] = {}
-
-        batch["images"] = torch.stack([sample["image"] for sample in samples])
-
-        batch["boxes"] = [sample["boxes"] for sample in samples]
-        batch["labels"] = [sample["labels"] for sample in samples]
-        batch["masks"] = [sample["masks"] for sample in samples]
-
-        if samples[0].get("padding_mask") is not None:
-            batch["padding_mask"] = torch.stack(
-                [sample["padding_mask"] for sample in samples]
+        augmented: list[DenseSample] = [
+            self.copy_paste.transform(
+                target, [s for j, s in enumerate(batch) if j != i]
             )
-
-        return batch
+            for i, target in enumerate(batch)
+        ]
+        return BatchedDenseSample.from_samples(augmented)

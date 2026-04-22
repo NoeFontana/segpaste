@@ -74,6 +74,7 @@ def instance_fields_strategy(
                 canvas_size=(h, w),
             ),
             "labels": torch.zeros((0,), dtype=torch.int64),
+            "instance_ids": torch.zeros((0,), dtype=torch.int32),
             "instance_masks": InstanceMask(torch.zeros((0, h, w), dtype=torch.bool)),
         }
 
@@ -99,6 +100,7 @@ def instance_fields_strategy(
             canvas_size=(h, w),
         ),
         "labels": torch.tensor(labels_list, dtype=torch.int64),
+        "instance_ids": torch.arange(n, dtype=torch.int32),
         "instance_masks": InstanceMask(masks),
     }
 

@@ -4,7 +4,7 @@
 | ---------- | ---------------------------------------------------- |
 | Number     | 0001                                                 |
 | Title      | Dense-sample composites (instance, panoptic, semantic, depth, normals) |
-| Status     | Superseded in part by [ADR-0003](0003-hard-deprecation-stance.md) — Part (i) deprecation policy only; invariants (Part ii), type-system decisions (Part iii), and seed policy (Part iv) remain in force |
+| Status     | Superseded in part by [ADR-0003](0003-hard-deprecation-stance.md) — Part (i) deprecation policy only — and by [ADR-0004](0004-batched-dense-sample.md) — Part (iii) type-table and `DenseSample` mutability only; invariants (Part ii) and seed policy (Part iv) remain in force |
 | Author     | @NoeFontana                                          |
 | Created    | 2026-04-20                                           |
 | Updated    | 2026-04-21                                           |
