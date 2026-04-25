@@ -40,14 +40,28 @@ def assert_depth_validity_join(
     before_src: DenseSample,
     before_tgt: DenseSample,
     after: DenseSample,
+    paste_mask: torch.Tensor,
 ) -> None:
-    """``V_out = V_src & V_tgt`` pixelwise."""
+    """Piecewise validity join (ADR-0001 §(ii), ADR-0007 §5).
+
+    Inside the translated paste mask, ``V_out = V_src ∧ V_tgt``; outside,
+    ``V_out = V_tgt``. ``paste_mask`` is the footprint the source was
+    pasted into (pre-z-test) — the composite is still target-dominant
+    outside that footprint.
+    """
     v_src = _depth_valid(before_src, "before_src")
     v_tgt = _depth_valid(before_tgt, "before_tgt")
     v_out = _depth_valid(after, "after")
 
-    if not torch.equal(v_out, v_src & v_tgt):
-        raise AssertionError("depth_valid != V_src & V_tgt")
+    p = paste_mask.to(torch.bool)
+    if p.dim() == 2:
+        p = p.unsqueeze(0)
+    expected = torch.where(p, v_src & v_tgt, v_tgt)
+    if not torch.equal(v_out, expected):
+        raise AssertionError(
+            "depth_valid violates piecewise join: expected V_src & V_tgt"
+            " inside paste_mask and V_tgt outside"
+        )
 
 
 def assert_depth_metric_intrinsics_rescale(
@@ -58,12 +72,15 @@ def assert_depth_metric_intrinsics_rescale(
     *,
     atol: float = 1e-5,
 ) -> None:
-    """``d_src <- d_src * f_tgt / f_src`` when metric depth is enabled.
+    """``d_src <- d_src * sqrt(fx_t*fy_t) / sqrt(fx_s*fy_s)`` (ADR-0007 §4).
 
-    Uses ``fx`` as the reference focal length; composites that need a
-    different axis should implement their own check.
+    The geometric mean of ``fx`` and ``fy`` handles non-square pixels
+    symmetrically; for isotropic pixels it reduces to the ``f_t/f_s``
+    ratio from ADR-0001 §(ii).
     """
-    ratio = tgt_intrinsics.fx / src_intrinsics.fx
+    num = (tgt_intrinsics.fx * tgt_intrinsics.fy) ** 0.5
+    den = (src_intrinsics.fx * src_intrinsics.fy) ** 0.5
+    ratio = num / den
     expected = src_raw_depth * ratio
     if not torch.allclose(rescaled_depth, expected, atol=atol):
         raise AssertionError(
