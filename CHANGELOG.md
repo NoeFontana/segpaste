@@ -29,6 +29,13 @@ Single-commit hard-deprecation of the entire CPU augmentation stack per
 - Compile-clean CI gate: `scripts/compile_explain.py` +
   `scripts/compile_allowlist.txt` (empty at v0.3.0;
   `tests/test_compile_clean.py` enforces).
+- `scripts/visualize_preset.py` — local validation renderer
+  ([ADR-0009](docs/adrs/0009-visual-validation-presets.md) §5). Runs a
+  preset's `BatchCopyPasteConfig` over a sample source, emits a contact
+  sheet plus per-sample drilldowns under `local_gallery/` and structured
+  JSON (`invariant_log.json`, `dataset_manifest.json`,
+  `run_manifest.json`) for paste into the PR description. Synthetic-only
+  source at P2; real-data adapters land in P3.
 - KS soft-report harness: `tests/test_batch_copy_paste_ks.py` records
   per-modality distances vs. `tests/fixtures/ks_snapshot.pt` as a CI
   artifact (no assertion at v0.3.0; ADR-0008 §D6 burn-in).
