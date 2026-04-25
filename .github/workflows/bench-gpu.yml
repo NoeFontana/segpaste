@@ -1,0 +1,76 @@
+# .github/workflows/bench-gpu.yml
+#
+# GPU throughput lane for BatchCopyPaste (ADR-0002 Part v, ADR-0008 §v).
+# workflow_dispatch only — no self-hosted A100 provisioned at M4, so this
+# is run manually against a runner the dispatcher names. No PR-level gate
+# until ADR-0008 §future-work flips that switch.
+
+name: bench-gpu
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Self-hosted runner label (e.g. `a100`)"
+        required: true
+        default: "a100"
+      batch_size:
+        description: "Batch size"
+        required: false
+        default: "8"
+      image_size:
+        description: "Image edge (px)"
+        required: false
+        default: "1024"
+      compile:
+        description: "Enable torch.compile(fullgraph=True)"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: bench-gpu-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bench-gpu:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --group bench
+
+      - name: Run GPU bench
+        run: |
+          uv run python -m benchmarks.bench_batch_copy_paste \
+            --device cuda \
+            --warmup 200 --iters 1000 \
+            --batch-size ${{ inputs.batch_size }} \
+            --image-size ${{ inputs.image_size }} \
+            --max-instances 5 \
+            ${{ inputs.compile == 'true' && '--compile' || '' }} \
+            --out current_gpu.json
+
+      - name: Upload GPU report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-gpu-${{ github.run_id }}
+          path: current_gpu.json
+          retention-days: 30
+
+      - name: Speedup vs. CPU baseline
+        run: |
+          uv run python -m benchmarks.compare \
+            --mode speedup-vs-cpu-baseline \
+            --baseline benchmarks/baseline.json \
+            --current current_gpu.json \
+            --min-speedup 2.0

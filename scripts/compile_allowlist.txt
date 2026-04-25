@@ -1,0 +1,8 @@
+# Compile-clean allow-list for BatchCopyPaste.forward (ADR-0008 §D7).
+#
+# One graph-break reason per line. Empty lines and lines beginning with
+# `#` are ignored. A reason matches when `compile_explain.py` finds its
+# substring inside any reported break's `reason` field.
+#
+# Additions require an ADR amendment — see scripts/compile_explain.py
+# and tests/test_compile_clean.py.

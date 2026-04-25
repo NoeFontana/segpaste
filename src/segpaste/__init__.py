@@ -11,14 +11,12 @@ except ImportError:
     logging.getLogger(__file__).warning("faster_coco_eval not found.")
 
 from segpaste.augmentation import (
-    CopyPasteAugmentation,
-    CopyPasteCollator,
+    BatchCopyPaste,
     FixedSizeCrop,
     RandomResize,
     SanitizeBoundingBoxes,
     make_large_scale_jittering,
 )
-from segpaste.config import CopyPasteConfig
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
 from segpaste.types import (
     BatchedDenseSample,
@@ -26,6 +24,7 @@ from segpaste.types import (
     DenseSample,
     InstanceMask,
     Modality,
+    PaddedBatchedDenseSample,
     PaddingMask,
     PanopticMap,
     PanopticSchema,
@@ -35,16 +34,15 @@ from segpaste.types import (
 __version__: str = _pkg_version("segpaste")
 
 __all__ = [
+    "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",
     "CocoDetectionV2",
-    "CopyPasteAugmentation",
-    "CopyPasteCollator",
-    "CopyPasteConfig",
     "DenseSample",
     "FixedSizeCrop",
     "InstanceMask",
     "Modality",
+    "PaddedBatchedDenseSample",
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",

@@ -1,7 +1,8 @@
 # .github/workflows/bench.yml
 #
-# Performance regression gate for `CopyPasteCollator`.
-# Contract pinned in docs/adrs/0002-performance-baseline.md.
+# Performance regression gate for `BatchCopyPaste` on the CPU lane.
+# Contract pinned in docs/adrs/0002-performance-baseline.md
+# (Parts i–iv); Part v covers the GPU dispatch lane in bench-gpu.yml.
 
 name: bench
 
@@ -43,7 +44,7 @@ jobs:
 
       - name: Run benchmark
         run: |
-          uv run python -m benchmarks.bench_copy_paste \
+          uv run python -m benchmarks.bench_batch_copy_paste \
             --device cpu --warmup 100 --iters 800 --image-size 512 \
             --out current.json
 
@@ -90,7 +91,7 @@ jobs:
       - name: Run 3 sequential bench passes
         run: |
           for i in 1 2 3; do
-            uv run python -m benchmarks.bench_copy_paste \
+            uv run python -m benchmarks.bench_batch_copy_paste \
               --device cpu --warmup 100 --iters 800 --image-size 512 \
               --out "nightly-$i.json"
           done
