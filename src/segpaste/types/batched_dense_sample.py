@@ -1,7 +1,7 @@
 """Batched dense-sample container.
 
-Introduced by ADR-0004. The canonical batch shape that :class:`CopyPasteCollator`
-produces and that downstream training code consumes. Stacked stacks (image,
+Introduced by ADR-0004. The canonical batch shape consumed by downstream
+training code and by :meth:`to_padded` / :class:`BatchCopyPaste`. Stacked stacks (image,
 semantic_map, panoptic_map, depth, depth_valid, normals, padding_mask) are fast
 to consume on GPU; per-sample ragged structures (boxes, labels, instance_masks,
 instance_ids, camera_intrinsics) preserve the per-sample object count variance
@@ -24,6 +24,7 @@ from segpaste.types.dense_sample import (
     PanopticMap,
     SemanticMap,
 )
+from segpaste.types.padded_batched_dense_sample import PaddedBatchedDenseSample
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +152,138 @@ class BatchedDenseSample:
             depth_valid=depth_valid,
             normals=normals,
             padding_mask=padding_mask,
+            camera_intrinsics=camera_intrinsics,
+        )
+
+    def to_padded(self, max_instances: int) -> PaddedBatchedDenseSample:
+        """Pack ragged per-sample instance fields into K-padded tensors.
+
+        Valid rows are written at slots ``[0, n_i)`` for each sample ``i`` and
+        marked ``True`` in ``instance_valid``. Padded rows are zero-valued.
+        Raises if any sample has more than ``max_instances`` objects.
+        """
+        b = self.batch_size
+        k = max_instances
+        device = self.images.device
+
+        if b > 0:
+            box_dtype = self.boxes[0].as_subclass(torch.Tensor).dtype
+            label_dtype = self.labels[0].dtype
+        else:
+            box_dtype = torch.float32
+            label_dtype = torch.int64
+
+        boxes_padded = torch.zeros((b, k, 4), dtype=box_dtype, device=device)
+        labels_padded = torch.zeros((b, k), dtype=label_dtype, device=device)
+        instance_valid = torch.zeros((b, k), dtype=torch.bool, device=device)
+
+        for i in range(b):
+            n = self.boxes[i].size(0)
+            if n > k:
+                raise ValueError(
+                    f"sample {i} has {n} instances, exceeds max_instances={k}"
+                )
+            if n > 0:
+                boxes_padded[i, :n] = self.boxes[i].as_subclass(torch.Tensor)
+                labels_padded[i, :n] = self.labels[i]
+                instance_valid[i, :n] = True
+
+        instance_masks_padded: torch.Tensor | None = None
+        instance_ids_padded: torch.Tensor | None = None
+        if self.instance_masks is not None and self.instance_ids is not None:
+            h, w = self.images.shape[-2:]
+            instance_masks_padded = torch.zeros(
+                (b, k, h, w), dtype=torch.bool, device=device
+            )
+            instance_ids_padded = torch.zeros((b, k), dtype=torch.int32, device=device)
+            for i in range(b):
+                n = self.instance_masks[i].size(0)
+                if n > 0:
+                    instance_masks_padded[i, :n] = self.instance_masks[i].as_subclass(
+                        torch.Tensor
+                    )
+                    instance_ids_padded[i, :n] = self.instance_ids[i]
+
+        camera_intrinsics_tensor: torch.Tensor | None = None
+        if self.camera_intrinsics is not None:
+            camera_intrinsics_tensor = torch.tensor(
+                [[c.fx, c.fy, c.cx, c.cy] for c in self.camera_intrinsics],
+                dtype=torch.float32,
+                device=device,
+            )
+
+        return PaddedBatchedDenseSample(
+            images=self.images,
+            boxes=boxes_padded,
+            labels=labels_padded,
+            instance_valid=instance_valid,
+            max_instances=k,
+            instance_masks=instance_masks_padded,
+            instance_ids=instance_ids_padded,
+            semantic_maps=self.semantic_maps,
+            panoptic_maps=self.panoptic_maps,
+            depth=self.depth,
+            depth_valid=self.depth_valid,
+            normals=self.normals,
+            padding_mask=self.padding_mask,
+            camera_intrinsics=camera_intrinsics_tensor,
+        )
+
+    @staticmethod
+    def from_padded(padded: PaddedBatchedDenseSample) -> "BatchedDenseSample":
+        """Unpack a :class:`PaddedBatchedDenseSample` into a ragged batch.
+
+        Uses ``instance_valid`` as the per-sample gather mask. Reconstructs
+        ``tv_tensors.BoundingBoxes`` in XYXY format (the DenseSample canonical
+        convention) and unpacks the ``[B, 4]`` intrinsics tensor back into
+        :class:`CameraIntrinsics` instances.
+        """
+        b = padded.batch_size
+        h, w = padded.images.shape[-2:]
+
+        boxes: list[tv_tensors.BoundingBoxes] = []
+        labels: list[torch.Tensor] = []
+        for i in range(b):
+            mask = padded.instance_valid[i]
+            boxes.append(
+                tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+                    padded.boxes[i][mask],
+                    format=tv_tensors.BoundingBoxFormat.XYXY,
+                    canvas_size=(h, w),
+                )
+            )
+            labels.append(padded.labels[i][mask])
+
+        instance_masks: list[InstanceMask] | None = None
+        instance_ids: list[torch.Tensor] | None = None
+        if padded.instance_masks is not None and padded.instance_ids is not None:
+            instance_masks = []
+            instance_ids = []
+            for i in range(b):
+                mask = padded.instance_valid[i]
+                instance_masks.append(InstanceMask(padded.instance_masks[i][mask]))
+                instance_ids.append(padded.instance_ids[i][mask])
+
+        camera_intrinsics: list[CameraIntrinsics] | None = None
+        if padded.camera_intrinsics is not None:
+            rows = cast(list[list[float]], padded.camera_intrinsics.tolist())
+            camera_intrinsics = [
+                CameraIntrinsics(fx=row[0], fy=row[1], cx=row[2], cy=row[3])
+                for row in rows
+            ]
+
+        return BatchedDenseSample(
+            images=padded.images,
+            boxes=boxes,
+            labels=labels,
+            instance_masks=instance_masks,
+            instance_ids=instance_ids,
+            semantic_maps=padded.semantic_maps,
+            panoptic_maps=padded.panoptic_maps,
+            depth=padded.depth,
+            depth_valid=padded.depth_valid,
+            normals=padded.normals,
+            padding_mask=padded.padding_mask,
             camera_intrinsics=camera_intrinsics,
         )
 

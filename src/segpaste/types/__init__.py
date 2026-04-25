@@ -15,6 +15,7 @@ from segpaste.types.dense_sample import (
     PanopticSchema,
     SemanticMap,
 )
+from segpaste.types.padded_batched_dense_sample import PaddedBatchedDenseSample
 from segpaste.types.type_aliases import (
     BoxesTensor,
     ImageTensor,
@@ -32,6 +33,7 @@ __all__ = [
     "LabelsTensor",
     "MasksTensor",
     "Modality",
+    "PaddedBatchedDenseSample",
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",

@@ -92,6 +92,7 @@ class DenseSample:
     normals: torch.Tensor | None = None  # [3, H, W], float32
     padding_mask: PaddingMask | None = None  # [1, H, W], bool
     camera_intrinsics: CameraIntrinsics | None = None
+    metric_depth: bool = False
 
     @skip_if_compiling
     def __post_init__(self) -> None:
@@ -139,6 +140,16 @@ class DenseSample:
         # Depth consistency: both fields together, or neither.
         if (self.depth is None) ^ (self.depth_valid is None):
             raise ValueError("depth and depth_valid must both be set or both be None")
+
+        # Metric depth requires calibrated intrinsics (ADR-0007 §1).
+        if (
+            self.metric_depth
+            and self.depth is not None
+            and self.camera_intrinsics is None
+        ):
+            raise ValueError(
+                "metric_depth=True requires camera_intrinsics when depth is set"
+            )
 
     def active_modalities(self) -> set[Modality]:
         """Return the set of active modalities for this sample."""

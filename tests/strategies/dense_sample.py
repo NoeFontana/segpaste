@@ -18,6 +18,7 @@ from hypothesis import strategies as st
 from torchvision import tv_tensors
 
 from segpaste.types import (
+    CameraIntrinsics,
     DenseSample,
     InstanceMask,
     Modality,
@@ -29,6 +30,11 @@ MAX_FUZZ_SIZE = 64
 _MIN_FUZZ_SIZE = 8
 _MAX_OBJECTS = 5
 _MAX_CLASSES = 8
+# Fuzz-only convention so that the panoptic strategy can honor the ADR-0001
+# §(ii) `z(p)==0 ⟺ stuff` invariant without a real PanopticSchema. Class 0
+# is stuff, classes 1..N-1 are things; 255 is ignore.
+_FUZZ_STUFF_CLASSES: frozenset[int] = frozenset({0})
+_FUZZ_IGNORE_INDEX = 255
 
 
 @st.composite
@@ -132,17 +138,26 @@ def panoptic_map_strategy(
     draw: st.DrawFn,
     h: int,
     w: int,
+    semantic_map: SemanticMap | None = None,
+    stuff_classes: frozenset[int] = _FUZZ_STUFF_CLASSES,
+    ignore_index: int = _FUZZ_IGNORE_INDEX,
     max_classes: int = _MAX_CLASSES,
 ) -> PanopticMap:
-    """Draw an ``[H, W]`` int64 panoptic id map.
+    """Draw an ``[H, W]`` int64 panoptic id map honoring ADR-0001 §(ii).
 
-    For the skeleton, ids are arbitrary non-negative integers < ``max_classes``.
-    Real schema-aware strategies will refine this in P1 alongside the
-    panoptic composite.
+    When ``semantic_map`` is supplied, stuff and ignore pixels receive id ``0``
+    and thing pixels receive random positive ids, so ``z(p)==0 ⟺ s(p)`` is a
+    stuff class (or ignore). When it is ``None``, every pixel is treated as a
+    thing and receives a positive id.
     """
     gen = _seeded_generator(draw)
-    data = torch.randint(0, max_classes, (h, w), dtype=torch.int64, generator=gen)
-    return PanopticMap(data)
+    ids = torch.randint(1, max_classes + 1, (h, w), dtype=torch.int64, generator=gen)
+    if semantic_map is not None:
+        sem = semantic_map.as_subclass(torch.Tensor)
+        stuff_tensor = torch.tensor(sorted(stuff_classes), dtype=sem.dtype)
+        is_stuff_or_ignore = torch.isin(sem, stuff_tensor) | (sem == ignore_index)
+        ids[is_stuff_or_ignore] = 0
+    return PanopticMap(ids)
 
 
 @st.composite
@@ -150,12 +165,27 @@ def depth_fields_strategy(
     draw: st.DrawFn,
     h: int,
     w: int,
-) -> dict[str, torch.Tensor]:
-    """Draw ``{"depth", "depth_valid"}`` with matching ``[1, H, W]`` shape."""
+    metric: bool = False,
+) -> dict[str, Any]:
+    """Draw ``{"depth", "depth_valid"}`` and optional metric-mode intrinsics.
+
+    When ``metric`` is set, additionally emits ``camera_intrinsics`` (finite
+    positive focal lengths and a centered principal point) and
+    ``metric_depth=True`` so the resulting :class:`DenseSample` satisfies
+    the cross-field invariant added by ADR-0007 §1.
+    """
     gen = _seeded_generator(draw)
     depth = torch.rand(1, h, w, generator=gen) * 10.0
     depth_valid = torch.rand(1, h, w, generator=gen) > 0.1
-    return {"depth": depth, "depth_valid": depth_valid}
+    out: dict[str, Any] = {"depth": depth, "depth_valid": depth_valid}
+    if metric:
+        fx = draw(st.floats(min_value=100.0, max_value=2000.0, allow_nan=False))
+        fy = draw(st.floats(min_value=100.0, max_value=2000.0, allow_nan=False))
+        out["camera_intrinsics"] = CameraIntrinsics(
+            fx=fx, fy=fy, cx=float(w) / 2.0, cy=float(h) / 2.0
+        )
+        out["metric_depth"] = True
+    return out
 
 
 @st.composite
@@ -198,7 +228,9 @@ def dense_sample_strategy(
     if Modality.SEMANTIC in modalities:
         fields["semantic_map"] = draw(semantic_map_strategy(h, w))
     if Modality.PANOPTIC in modalities:
-        fields["panoptic_map"] = draw(panoptic_map_strategy(h, w))
+        fields["panoptic_map"] = draw(
+            panoptic_map_strategy(h, w, semantic_map=fields.get("semantic_map"))
+        )
     if Modality.DEPTH in modalities:
         fields.update(draw(depth_fields_strategy(h, w)))
     if Modality.NORMALS in modalities:
