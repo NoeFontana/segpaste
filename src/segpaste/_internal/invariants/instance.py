@@ -1,14 +1,19 @@
 """Instance-modality invariants per ADR-0001 §(ii)."""
 
+from __future__ import annotations
+
 import torch
 from torchvision.ops import masks_to_boxes
 
+from segpaste._internal.invariants._report import InvariantReport, raise_if_violated
+from segpaste._internal.invariants._require import require
 from segpaste.processing import compute_mask_area
 from segpaste.types import DenseSample
-from tests.invariants import require
 
 
-def assert_instance_identity_preserved(before: DenseSample, after: DenseSample) -> None:
+def check_instance_identity_preserved(
+    before: DenseSample, after: DenseSample
+) -> InvariantReport:
     """Every surviving instance keeps its label.
 
     Identity preservation here is label-level: any ``after`` instance whose
@@ -19,6 +24,7 @@ def assert_instance_identity_preserved(before: DenseSample, after: DenseSample) 
     overlapping/identical before-masks), matching any one of their labels
     suffices — we cannot disambiguate parentage from masks alone.
     """
+    name = "instance.identity_preserved"
     before_masks = require(
         before.instance_masks, "before sample must carry instance_masks"
     ).to(torch.bool)
@@ -27,7 +33,7 @@ def assert_instance_identity_preserved(before: DenseSample, after: DenseSample) 
     ).to(torch.bool)
 
     if after_masks.numel() == 0:
-        return
+        return InvariantReport(name=name, ok=True)
 
     for j in range(after_masks.size(0)):
         after_mask = after_masks[j]
@@ -42,15 +48,26 @@ def assert_instance_identity_preserved(before: DenseSample, after: DenseSample) 
         if not containing:
             continue
         if not any(int(before.labels[i].item()) == after_label for i in containing):
-            raise AssertionError(
-                f"after-instance {j} (label {after_label}) is contained by"
-                f" before-instances {containing} but none share its label"
+            return InvariantReport(
+                name=name,
+                ok=False,
+                message=(
+                    f"after-instance {j} (label {after_label}) is contained by"
+                    f" before-instances {containing} but none share its label"
+                ),
+                details={"after_index": j, "after_label": after_label},
             )
 
+    return InvariantReport(name=name, ok=True)
 
-def assert_instance_target_masks_subtract_paste_union(
+
+def assert_instance_identity_preserved(before: DenseSample, after: DenseSample) -> None:
+    raise_if_violated(check_instance_identity_preserved(before, after))
+
+
+def check_instance_target_masks_subtract_paste_union(
     before: DenseSample, after: DenseSample, paste_union: torch.Tensor
-) -> None:
+) -> InvariantReport:
     """Surviving target masks equal ``M_i \\ U`` where ``U`` is the paste union.
 
     Operationally: every non-empty after-mask is either entirely outside U
@@ -58,6 +75,7 @@ def assert_instance_target_masks_subtract_paste_union(
     inside U (a pasted instance, whose mask contributes to U by construction).
     A mask straddling U would mean the subtraction was incomplete.
     """
+    name = "instance.target_masks_subtract_paste_union"
     require(before.instance_masks, "before sample must carry instance_masks")
     after_masks = require(
         after.instance_masks, "after sample must carry instance_masks"
@@ -70,52 +88,89 @@ def assert_instance_target_masks_subtract_paste_union(
     straddles = nonempty & has_inside & has_outside
     if bool(straddles.any()):
         idx = int(straddles.nonzero(as_tuple=True)[0][0].item())
-        raise AssertionError(
-            f"after-instance {idx} straddles the paste union U"
-            " (expected either fully inside = paste, or fully outside = survivor);"
-            " subtraction by U must be complete on survivors"
+        return InvariantReport(
+            name=name,
+            ok=False,
+            message=(
+                f"after-instance {idx} straddles the paste union U"
+                " (expected either fully inside = paste, or fully outside = survivor);"
+                " subtraction by U must be complete on survivors"
+            ),
+            details={"straddling_index": idx},
         )
+    return InvariantReport(name=name, ok=True)
 
 
-def assert_instance_bbox_recomputed_from_mask(sample: DenseSample) -> None:
+def assert_instance_target_masks_subtract_paste_union(
+    before: DenseSample, after: DenseSample, paste_union: torch.Tensor
+) -> None:
+    raise_if_violated(
+        check_instance_target_masks_subtract_paste_union(before, after, paste_union)
+    )
+
+
+def check_instance_bbox_recomputed_from_mask(sample: DenseSample) -> InvariantReport:
     """Each box equals ``bbox(mask)`` for its instance."""
+    name = "instance.bbox_recomputed_from_mask"
     masks = require(sample.instance_masks, "sample must carry instance_masks")
     if masks.size(0) == 0:
-        return
+        return InvariantReport(name=name, ok=True)
 
     nonempty = masks.to(torch.bool).flatten(1).any(dim=1)
     if not bool(nonempty.any()):
-        return
+        return InvariantReport(name=name, ok=True)
 
     computed = masks_to_boxes(masks[nonempty].to(torch.uint8))
     actual = torch.as_tensor(sample.boxes)[nonempty].to(computed.dtype)
     if not torch.allclose(computed, actual, atol=1.0):
-        raise AssertionError(
-            "boxes disagree with masks_to_boxes(masks):\n"
-            f"  computed: {computed}\n  actual: {actual}"
+        return InvariantReport(
+            name=name,
+            ok=False,
+            message=(
+                "boxes disagree with masks_to_boxes(masks):\n"
+                f"  computed: {computed}\n  actual: {actual}"
+            ),
         )
+    return InvariantReport(name=name, ok=True)
 
 
-def assert_instance_small_area_dropped(sample: DenseSample, tau: int) -> None:
+def assert_instance_bbox_recomputed_from_mask(sample: DenseSample) -> None:
+    raise_if_violated(check_instance_bbox_recomputed_from_mask(sample))
+
+
+def check_instance_small_area_dropped(sample: DenseSample, tau: int) -> InvariantReport:
     """No surviving instance has mask area < ``tau``."""
+    name = "instance.small_area_dropped"
     masks = require(sample.instance_masks, "sample must carry instance_masks")
     if masks.size(0) == 0:
-        return
+        return InvariantReport(name=name, ok=True)
 
     areas = compute_mask_area(masks.to(torch.bool))
     too_small = areas < tau
     if bool(too_small.any()):
-        raise AssertionError(
-            f"{int(too_small.sum().item())} instance(s) have area < {tau}:"
-            f" areas={areas.tolist()}"
+        violator_count = int(too_small.sum().item())
+        return InvariantReport(
+            name=name,
+            ok=False,
+            message=(
+                f"{violator_count} instance(s) have area < {tau}:"
+                f" areas={areas.tolist()}"
+            ),
+            details={"violator_count": violator_count, "tau": tau},
         )
+    return InvariantReport(name=name, ok=True)
 
 
-def assert_instance_no_same_class_overlap(sample: DenseSample) -> None:
+def assert_instance_small_area_dropped(sample: DenseSample, tau: int) -> None:
+    raise_if_violated(check_instance_small_area_dropped(sample, tau))
+
+
+def check_instance_no_same_class_overlap(sample: DenseSample) -> InvariantReport:
     """No pixel is assigned to two instances of the same class."""
+    name = "instance.no_same_class_overlap"
     masks_opt = require(sample.instance_masks, "sample must carry instance_masks")
     if masks_opt.size(0) < 2:
-        return
+        return InvariantReport(name=name, ok=True)
 
     masks = masks_opt.to(torch.bool)
     labels = sample.labels
@@ -124,4 +179,14 @@ def assert_instance_no_same_class_overlap(sample: DenseSample) -> None:
         if cls_masks.size(0) < 2:
             continue
         if bool((cls_masks.to(torch.int32).sum(dim=0) > 1).any()):
-            raise AssertionError(f"class {cls} has pixels assigned to >1 instance")
+            return InvariantReport(
+                name=name,
+                ok=False,
+                message=f"class {cls} has pixels assigned to >1 instance",
+                details={"class": int(cls)},
+            )
+    return InvariantReport(name=name, ok=True)
+
+
+def assert_instance_no_same_class_overlap(sample: DenseSample) -> None:
+    raise_if_violated(check_instance_no_same_class_overlap(sample))
