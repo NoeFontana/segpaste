@@ -2,6 +2,7 @@ data/
 *.png
 output/
 ks_report/
+local_gallery/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

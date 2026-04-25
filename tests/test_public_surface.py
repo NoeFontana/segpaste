@@ -28,12 +28,16 @@ _EXPECTED_PUBLIC_API: tuple[str, ...] = (
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",
+    "PresetConfig",
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SemanticMap",
     "__version__",
     "create_coco_dataloader",
+    "get_preset",
+    "list_presets",
     "make_large_scale_jittering",
+    "register_preset",
 )
 
 

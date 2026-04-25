@@ -18,6 +18,7 @@ from segpaste.augmentation import (
     make_large_scale_jittering,
 )
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
+from segpaste.presets import PresetConfig, get_preset, list_presets, register_preset
 from segpaste.types import (
     BatchedDenseSample,
     CameraIntrinsics,
@@ -46,10 +47,14 @@ __all__ = [
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",
+    "PresetConfig",
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SemanticMap",
     "__version__",
     "create_coco_dataloader",
+    "get_preset",
+    "list_presets",
     "make_large_scale_jittering",
+    "register_preset",
 ]
