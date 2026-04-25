@@ -26,6 +26,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Binary-file guard
+        # ADR-0009 §4: reject imagery and stray tensor files outside the
+        # synthetic-fixture allow-list. Runs before lint so a bad-shape
+        # commit fails fast.
+        run: python scripts/check_no_binaries.py
+
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
