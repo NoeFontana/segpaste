@@ -57,3 +57,20 @@ jobs:
           uv run pytest
           end=$(date +%s)
           echo "pytest wall-clock: $((end - start))s"
+
+      - name: Compile-clean gate
+        # ADR-0008 §D7: torch._dynamo.explain on CPU trace must report zero
+        # graph-break reasons outside scripts/compile_allowlist.txt.
+        run: uv run python scripts/compile_explain.py
+
+      - name: Upload KS soft-report artifact
+        # ADR-0008 §D6: 30-day burn-in records KS distances without asserting.
+        # After the burn-in closes, test_batch_copy_paste_ks.py is hardened.
+        if: matrix.python-version == '3.12' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ks-report-${{ github.run_id }}
+          path: ks_report/
+          if-no-files-found: ignore
+          retention-days: 30
+

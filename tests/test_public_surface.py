@@ -16,16 +16,15 @@ import segpaste
 # Pinned public surface. Any drift fails this test. Amendments require an
 # ADR update; see ADR-0001 Part (i) and ADR-0003.
 _EXPECTED_PUBLIC_API: tuple[str, ...] = (
+    "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",
     "CocoDetectionV2",
-    "CopyPasteAugmentation",
-    "CopyPasteCollator",
-    "CopyPasteConfig",
     "DenseSample",
     "FixedSizeCrop",
     "InstanceMask",
     "Modality",
+    "PaddedBatchedDenseSample",
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",

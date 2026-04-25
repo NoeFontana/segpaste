@@ -198,8 +198,8 @@ def labels_getter(
 def _identity_collate(batch: list[DenseSample]) -> list[DenseSample]:
     """Default collate that passes ``list[DenseSample]`` through unchanged.
 
-    :class:`segpaste.augmentation.CopyPasteCollator` is the intended collator;
-    when absent, downstream code calls :meth:`BatchedDenseSample.from_samples`.
+    Downstream code calls :meth:`BatchedDenseSample.from_samples` followed by
+    :meth:`BatchedDenseSample.to_padded` to feed :class:`BatchCopyPaste`.
     """
     return batch
 
@@ -219,8 +219,9 @@ def create_coco_dataloader(
         transforms (v2.Transform): Transform applied to each sample.
         batch_size (int): Batch size for the returned DataLoader.
         collate_fn: Collate function; defaults to an identity collate that
-            yields ``list[DenseSample]`` — wire :class:`CopyPasteCollator`
-            when copy-paste augmentation is desired.
+            yields ``list[DenseSample]`` — wrap the result through
+            :meth:`BatchedDenseSample.from_samples` → ``.to_padded(K)`` →
+            :class:`BatchCopyPaste` to apply augmentation.
 
     Returns:
         A DataLoader yielding :class:`DenseSample` instances.

@@ -1,6 +1,7 @@
 data/
 *.png
 output/
+ks_report/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -100,3 +101,6 @@ Thumbs.db
 
 # uv
 .python-version
+
+# Local Claude Code state
+.claude/

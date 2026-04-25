@@ -1,0 +1,4 @@
+{
+  "schema_version": 1,
+  "_comment": "Populated on the first A100 dispatch of bench-gpu.yml. Until then, benchmarks/compare.py --mode speedup-vs-cpu-baseline refuses to compare."
+}
