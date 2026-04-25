@@ -91,6 +91,35 @@ to be exposed, a new ADR introduces the namespace then.
   the surface from re-accreting during P1 churn. Adding a public name now
   requires an ADR amendment.
 
+## Canonical example: W5 (ADR-0008)
+
+W5 / [ADR-0008](0008-batch-copy-paste.md) is the canonical hard-deprecation
+application of this policy. In one commit (`C7` in the ADR-0008 sequencing),
+the following are deleted outright — no experimental namespace, no
+`DeprecationWarning` shim, no subclass forwarder — and replaced by
+`BatchCopyPaste` + `PaddedBatchedDenseSample`:
+
+- `CopyPasteCollator` (public), `CopyPasteAugmentation` (internal),
+  the four modality wrappers (`InstancePaste`, `PanopticPaste`,
+  `DepthAwarePaste`, `ClassMix`), both `placement.py` modules.
+- Four `tests/fixtures/*_baseline.pt` parity fixtures; the three
+  parity tests they anchor; six unit / fuzz tests that exercise the
+  deleted classes.
+- Three `scripts/gen_*_baseline.py` generators; four
+  `benchmarks/bench_*.py` per-wrapper benches; `benchmarks/_fixture.py`.
+
+Users who need the old behavior pin `segpaste<0.10` (same migration
+path as §CopyPasteTransform). The single-commit deletion is the
+forcing function that prevents a half-migrated `main`:
+`BatchCopyPaste.from_dataloader(loader, max_instances)` is the
+documented migration helper, landed in the same commit.
+
+Numerical equivalence between the pre-deletion CPU path and the
+GPU-resident replacement is defended by a 30-day soft-report KS gate
+(ADR-0008 §6), not by a DeprecationWarning window. Surface stability
+and numerical equivalence are separate concerns; only the latter
+warrants a grace period pre-1.0.
+
 ## Status and supersession
 
 - **Accepted** when this file lands on `main` with `Status: Accepted`.

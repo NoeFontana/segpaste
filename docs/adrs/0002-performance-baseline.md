@@ -215,10 +215,6 @@ additive and land under this ADR.
 
 ## Part (iv) — Out of scope
 
-- **GPU / CUDA lane.** The harness's `--device cuda` code path is
-  implemented and testable locally. The CI lane is deferred to P0.D,
-  which provides the A100 runner. Adding the `bench-gpu` job and its
-  gate is an additive change under this ADR.
 - **Durable time-series storage.** Nightly reports land as GitHub
   Actions artifacts with 14-day retention. A follow-up ADR pins the
   long-term storage mechanism (orphan branch, external TSDB, etc.)
@@ -231,6 +227,86 @@ additive and land under this ADR.
   pinned. Peak-RSS and allocator-stats are useful diagnostics but
   would broaden the contract beyond what P1's 2× throughput criterion
   needs.
+
+The GPU/CUDA lane, originally listed here as deferred to P0.D, is
+discharged by Part (v) below.
+
+---
+
+## Part (v) — GPU throughput lane
+
+Added by [ADR-0008](0008-batch-copy-paste.md). The CPU entry point
+(`CopyPasteCollator`) is deleted in the same workstream and replaced by
+`BatchCopyPaste(nn.Module)`, which becomes the subject of the GPU
+measurement. The CPU `baseline.json` (Part (i)) remains the anchor for
+the `≥ 2×` Phase 1 exit criterion.
+
+### Canonical GPU workload
+
+Same shape as Part (i), lifted to CUDA:
+
+- **Batch size:** `8`.
+- **Image size:** `1024 × 1024`. (The CPU baseline lowered to `512²`
+  to fit `ubuntu-latest`'s 25-minute timeout. The A100 SXM runner is
+  not constrained the same way; `1024²` matches the original P0.C
+  brief and is a realistic training resolution for panoptic /
+  Cityscapes-class workloads.)
+- **`k` pasted instances per image:** `k ∼ U{1, …, 5}` (unchanged).
+- **Source:** intra-batch, via `torch.multinomial` with the diagonal
+  masked ([ADR-0008](0008-batch-copy-paste.md) §3). A future
+  `InstanceBank` (ADR-0009) will expand the source pool without changing
+  the workload shape under this ADR.
+
+### Timer usage
+
+Same as Part (i), with the CUDA-specific addition:
+`torch.cuda.synchronize()` is emitted once after the warmup window and
+once after the measurement window before collecting per-iter nanoseconds.
+Warmup at `200` calls (the CPU baseline uses `100`) to let cuDNN autotune
+settle; measurement at `1000` calls (the CPU baseline uses `800`) to
+absorb the larger per-iter variance from kernel-launch jitter.
+
+### JSON schema delta
+
+The bench report adds two fields to the Part (i) schema without
+bumping `schema_version`:
+
+- `compile`: `bool` — whether `torch.compile(mode='reduce-overhead',
+  dynamic=True, fullgraph=True)` was applied.
+- `max_memory_allocated_bytes`: `int` — peak device memory reported by
+  `torch.cuda.max_memory_allocated()` during the measurement window.
+
+### CI lane and gating
+
+- **Workflow:** `.github/workflows/bench-gpu.yml`, triggered by
+  `workflow_dispatch` only at M4. Runs `benchmarks/bench_batch_copy_paste.py
+  --device cuda --compile --batch-size 8 --image-size 1024`. The
+  A100 SXM runner is self-hosted and manually provisioned per run.
+- **Committed artifact:** `benchmarks/baseline_gpu.json`, initially an
+  empty placeholder, populated on the first successful dispatch.
+- **Gate.** `benchmarks/compare.py --mode speedup-vs-cpu-baseline`
+  compares `baseline_gpu.json.median_ns` against the CPU
+  `baseline.json.median_ns` and exits non-zero when the speedup is
+  below `2.0`. The gate runs only on manual dispatch; PR-level GPU
+  gating is deferred until a persistent self-hosted runner lands.
+- **Memory cap.** The bench asserts
+  `max_memory_allocated_bytes < 40 × 2^30` (40 GB) on the Cityscapes
+  panoptic `B=8, 2048²` fixture; failure exits the bench with code 3.
+
+### Compile-clean gate
+
+Every PR runs `scripts/compile_explain.py`, which invokes
+`torch._dynamo.explain` on a CPU trace of `BatchCopyPaste.forward` and
+diffs the graph-break-reason list against `scripts/compile_allowlist.txt`.
+The allow-list is empty at M4 and additions require an ADR-0008
+amendment. This runs on `ubuntu-latest`; no GPU required.
+
+### Baseline refresh
+
+Part (iii)'s refresh policy applies to `baseline_gpu.json` with two
+substitutions: the runner pin is the self-hosted A100 SXM runner (not
+`ubuntu-latest`), and the three-run acceptance criterion uses the
+`iters` / `warmup` pair specified above.
 
 ---
 

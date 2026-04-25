@@ -65,3 +65,4 @@ nav:
       - ADR-0002 Performance Baseline: adrs/0002-performance-baseline.md
       - ADR-0003 Hard Deprecation Stance: adrs/0003-hard-deprecation-stance.md
       - ADR-0004 Batched Dense Sample: adrs/0004-batched-dense-sample.md
+      - ADR-0008 Batch Copy-Paste (GPU): adrs/0008-batch-copy-paste.md

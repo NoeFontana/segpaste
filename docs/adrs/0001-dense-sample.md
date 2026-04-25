@@ -181,14 +181,24 @@ minimum-area thresholds.
   $d_\text{out}(p) = \min(d_\text{src}(p), d_\text{tgt}(p))$ for every
   $p \in M_\text{eff}$. —
   `test_depth_monotonicity`
-- Validity join: $V_\text{out} = V_\text{src} \wedge V_\text{tgt}$
-  (AND over the two boolean validity maps). —
+- Validity join (piecewise):
+  $V_\text{out}(p) = V_\text{tgt}(p)$ for $p \notin M_\text{eff}$;
+  $V_\text{out}(p) = V_\text{src}(p) \wedge V_\text{tgt}(p)$ for
+  $p \in M_\text{eff}$. Outside the effective paste mask the target's
+  validity is preserved untouched; inside, both inputs must be valid
+  for the pasted pixel to be trusted. See [ADR-0007 §5](0007-depth-aware-paste.md)
+  for the reconciliation of this wording with the prior AND-everywhere
+  draft. —
   `test_depth_validity_join`
 - Intrinsics rescale when `metric_depth=True`:
-  $d_\text{src}(p) \leftarrow d_\text{src}(p) \cdot f_\text{tgt} / f_\text{src}$
-  before the monotonicity step, where $f$ is the relevant focal length
-  component from `CameraIntrinsics` (Part (iii)). When
-  `metric_depth=False`, no rescale is performed. —
+  $d_\text{src}(p) \leftarrow d_\text{src}(p) \cdot
+  \sqrt{f_x^{t} f_y^{t}} / \sqrt{f_x^{s} f_y^{s}}$
+  before the monotonicity step, where $f_x, f_y$ are the focal-length
+  components from `CameraIntrinsics` (Part (iii)). The geometric mean
+  handles non-square pixels symmetrically; for isotropic pixels
+  ($f_x = f_y$) the ratio reduces to $f^{t} / f^{s}$. When
+  `metric_depth=False`, no rescale is performed. See
+  [ADR-0007 §4](0007-depth-aware-paste.md). —
   `test_depth_metric_intrinsics_rescale`
 
 ### Normals
@@ -227,7 +237,8 @@ fields below. Validation runs in `__post_init__`, wrapped in the existing
 | `depth_valid` | `torch.Tensor` (plain, with tv-dispatch shim) | `[1, H, W]`, `bool` | when depth modality active |
 | `normals` | `torch.Tensor` (plain, with tv-dispatch shim) | `[3, H, W]`, `float32`, unit norm on valid | when normals modality active |
 | `padding_mask` | `PaddingMask \| None` | `[1, H, W]`, `bool` | optional |
-| `camera_intrinsics` | `CameraIntrinsics \| None` | — | required when any composite uses `metric_depth=True` |
+| `camera_intrinsics` | `CameraIntrinsics \| None` | — | required when `metric_depth=True` and `depth` is set |
+| `metric_depth` | `bool` | — | default `False`; pairs with `camera_intrinsics` |
 
 **Rationale for the TVTensor upgrade.** Today `image`, `boxes`,
 `instance_masks` (as `masks`), and `labels` are plain `torch.Tensor` aliases
@@ -258,9 +269,13 @@ class CameraIntrinsics:
 
 Units are pixels (focal length and principal point in pixel coordinates, as
 produced by the standard pinhole calibration). The field is required
-on `DenseSample` when any composite is constructed with `metric_depth=True`;
-otherwise optional. A composite that consumes intrinsics without
-`metric_depth=True` set is a programming error and raises `ValueError`.
+on `DenseSample` when `metric_depth=True` and `depth` is set; otherwise
+optional. `DenseSample.__post_init__` enforces this cross-field
+invariant — silent fallback to identity intrinsics would let a metric
+composite operate on un-calibrated values and is explicitly forbidden.
+A composite that consumes intrinsics without `metric_depth=True` on its
+operands is a programming error and raises `ValueError`. See
+[ADR-0007 §1](0007-depth-aware-paste.md).
 
 ### `PanopticSchema`
 
