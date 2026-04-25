@@ -62,7 +62,7 @@ The pixelwise where-composite primitive lives in `_internal/composite.py::DenseC
 
 ## Testing
 
-- `tests/strategies/` and `tests/invariants/` host the Hypothesis strategies and the `@pytest.mark.invariant` matrix that pins ADR-0001 per-modality invariants.
+- `tests/strategies/` hosts the Hypothesis strategies for ADR-0001 per-modality invariants. The invariants themselves live in `src/segpaste/_internal/invariants/` as paired `check_* -> InvariantReport` (non-raising) and `assert_*` (raising) predicates, shared by the test suite and the visualizer (P5+).
 - `tests/shared.py` provides canonical LSJ / resize transform pipelines — reuse these rather than rebuilding similar pipelines in new tests.
 - `tests/test_public_surface.py` enforces the ADR-pinned top-level API; see §Public surface.
 - `tests/test_compile_clean.py` runs `torch._dynamo.explain` on `BatchCopyPaste.forward` against a fixture batch and fails on any graph break outside `scripts/compile_allowlist.txt`.
