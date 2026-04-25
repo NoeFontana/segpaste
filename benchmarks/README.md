@@ -1,13 +1,15 @@
 # benchmarks/
 
-End-to-end throughput harness for `CopyPasteCollator`. Contract pinned in
+End-to-end throughput harness for `BatchCopyPaste`. Contract pinned in
 [`docs/adrs/0002-performance-baseline.md`](../docs/adrs/0002-performance-baseline.md).
+Part v of the ADR adds the GPU dispatch lane (`bench-gpu.yml` /
+`bench_batch_copy_paste.py --device cuda`) — see ADR-0008 §v.
 
 ## Run locally
 
 ```bash
 uv sync --group bench
-uv run python -m benchmarks.bench_copy_paste \
+uv run python -m benchmarks.bench_batch_copy_paste \
   --device cpu --warmup 100 --iters 800 --image-size 512 \
   --out /tmp/run.json
 ```
