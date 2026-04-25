@@ -18,42 +18,35 @@ uv run ruff format --check .     # format check (CI gate)
 uv run ruff check .              # lint (CI gate)
 uv run pyright                   # strict type check (CI gate)
 uv run pytest                    # full test suite (runs with coverage per pyproject.toml)
-uv run pytest tests/test_copy_paste.py::test_name   # single test
+uv run pytest tests/test_batch_copy_paste_shape.py::test_name   # single test
+uv run python scripts/compile_explain.py --allowlist scripts/compile_allowlist.txt
 ```
 
-`make format` auto-fixes lint + formatting across `src`, `tests`, and `examples`. `make test-cov` runs pytest with HTML coverage.
+`make format` auto-fixes lint + formatting across `src` and `tests`. `make test-cov` runs pytest with HTML coverage.
 
-Pyright runs in `strict` mode with `include = ["src", "tests", "examples", "benchmarks"]`. The four `reportUnknown*` / `reportMissingTypeStubs` rules are downgraded from `error` to `warning` (per ADR-0001 Part (i)'s audit) because every first-party hit comes from a line interacting with `torchvision` / `fiftyone` / `faster_coco_eval`, none of which ship complete stubs. CI exits 0 on warnings; only errors gate merges. Coverage floor is pinned at 80% in `[tool.coverage.report].fail_under` — raise only when the measured floor moves up.
+Pyright runs in `strict` mode with `include = ["src", "tests", "benchmarks"]`. The four `reportUnknown*` / `reportMissingTypeStubs` rules are downgraded from `error` to `warning` (per ADR-0001 Part (i)'s audit) because every first-party hit comes from a line interacting with `torchvision` / `fiftyone` / `faster_coco_eval`, none of which ship complete stubs. CI exits 0 on warnings; only errors gate merges. Coverage floor is pinned at 80% in `[tool.coverage.report].fail_under` — raise only when the measured floor moves up.
 
 ## Architecture
 
-### Data flow around `DetectionTarget` (0.9.x internal-only)
+### Sample containers (`types/`)
 
-`segpaste.types.DetectionTarget` is the legacy instance-only container used by every augmentation step. It bundles `image [C,H,W]`, `boxes [N,4]` in xyxy, `labels [N]`, `masks [N,H,W]`, and an optional `padding_mask [1,H,W]`. It has `from_dict` / `to_dict` helpers so transforms can accept torchvision's dictionary-style targets and round-trip through copy-paste. Shape/consistency validation happens in `__post_init__` but is bypassed under `torch.compile` via the `skip_if_compiling` decorator in `compile_util.py`.
-
-As of 0.9.0 `DetectionTarget` is removed from `segpaste.__all__` and `segpaste.types.__all__` — it is internal-only. P1's W1 workstream migrates every transform to `DenseSample` and deletes the class in 0.9.1. Conversion uses the bidirectional static methods `DenseSample.from_detection_target` / `DenseSample.to_detection_target`. See [ADR-0003](docs/adrs/0003-hard-deprecation-stance.md).
+`DenseSample` is the per-image canonical container: an `image`, optional `instance_masks`/`boxes`/`labels`/`instance_ids`, optional `semantic_map`, `panoptic_map`, `depth` + `depth_valid` + `metric_depth` flag, `normals`, `camera_intrinsics`, and an optional `padding_mask`. `BatchedDenseSample` stacks these with ragged per-sample instance counts. `PaddedBatchedDenseSample` is the `[B, K, ...]` sibling produced by `BatchedDenseSample.to_padded(max_instances)` — every field is leading-batch with an `instance_valid [B, K]` gate so the forward pass traces under `torch.compile(fullgraph=True)`. Shape/consistency validators in `__post_init__` are bypassed inside compiled regions via the `skip_if_compiling` decorator in `compile_util.py`.
 
 `PaddingMask` subclasses `tv_tensors.Mask` but is semantically *not* tied to an object instance — it marks padded pixels of an image. The reimplemented `SanitizeBoundingBoxes` in `augmentation/lsj.py` forwards `PaddingMask` instances unchanged (the stock torchvision version would try to filter them alongside per-object masks).
 
 ### Public entry point
 
-**`CopyPasteCollator`** — a drop-in `collate_fn` for `DataLoader` that treats every object in the batch as a potential source for every other image in the batch. Requires `batch_size > 1`. Lives in `augmentation/torchvision.py`. Delegates to `CopyPasteAugmentation.transform(target, source_objects)`.
+**`BatchCopyPaste`** (`augmentation/batch_copy_paste.py`) — `nn.Module` consuming a `PaddedBatchedDenseSample` and returning one. Replaces every CPU wrapper from the pre-v0.3.0 stack (instance, panoptic, depth-aware, classmix) under a single graph-compilable forward. Configuration is `BatchCopyPasteConfig`, a frozen Pydantic model with `extra="forbid"`. The compile-clean invariant is pinned by `tests/test_compile_clean.py` against the empty allow-list at `scripts/compile_allowlist.txt` (additions require an ADR amendment per ADR-0008 §D7).
 
-### Copy-paste pipeline (`augmentation/copy_paste.py`)
+### GPU pipeline (`_internal/gpu/`)
 
-`CopyPasteAugmentation` orchestrates a single image's augmentation:
+`BatchCopyPaste.forward` runs three stages, all leading-batch tensor:
 
-1. Roll against `paste_probability`; sample `random.randint(min_paste_objects, max_paste_objects)` source objects.
-2. Validate each source with `_is_valid_object` (min edge, min area).
-3. For each object, call `_try_place_single_object` → `processing.placement.create_object_placer` → `ObjectPlacer.find_valid_placement`. Placement respects existing pasted boxes (IoU-based collision) and the target's padding mask.
-4. Alpha-blend the object in `_blend_object_on_target`, then stack a per-object binary mask into target coordinates.
-5. `_update_and_filter_occluded_objects` subtracts new masks from originals, recomputes boxes via `torchvision.ops.masks_to_boxes`, and drops any original whose remaining area ratio exceeds `occluded_area_threshold`.
+1. `BatchedPlacementSampler` (`batched_placement.py`) draws one affine per target slot — `(source_idx, scale, translate, hflip)` — under a diagonal-masked `torch.multinomial` so every target picks a source `!= i`. Returns a `BatchedPlacement` plus a `paste_valid [B, K]` gate.
+2. `AffinePropagator` (`affine_propagate.py`) applies the sampled affine to every channel group of the selected source via `grid_sample` — bilinear for continuous modalities (image, depth, normals), nearest for label modalities (instance/semantic/panoptic, depth_valid). Hflip applies the normals x-sign-flip per ADR-0007 §7.
+3. `TileCompositor` (`tile_composite.py`) iterates over fixed-size tiles and runs `DenseComposite._effective_mask`'s z-test (ADR-0005 §3) per-tile so activation memory scales with `tile_size²`.
 
-Configuration is `segpaste.config.CopyPasteConfig`, a frozen Pydantic model with `extra="forbid"` — unknown fields raise.
-
-### Placement strategies (`processing/placement.py`)
-
-Uses a Protocol + composition pattern: `PlacementGenerator` produces candidates, a list of `PlacementValidator` filters them. `create_object_placer` picks `PaddingAwarePlacementGenerator` when a padding mask is supplied, otherwise `RandomPlacementGenerator`, and always wires `BoundsValidator` + `OverlapValidator`. When adding new placement behaviors, implement the Protocols rather than editing `ObjectPlacer`.
+The pixelwise where-composite primitive lives in `_internal/composite.py::DenseComposite` and is consumed both by the tile compositor and by direct unit tests (`tests/test_dense_composite.py`).
 
 ### LSJ helpers (`augmentation/lsj.py`)
 
@@ -61,7 +54,7 @@ Uses a Protocol + composition pattern: `PlacementGenerator` produces candidates,
 
 ### COCO integration (`integrations/coco.py`)
 
-`CocoDetectionV2` wraps `faster_coco_eval`'s `COCO` and yields `(image, target_dict)` where `target_dict` is already shaped for transforms v2 (`tv_tensors.BoundingBoxes` in XYXY, `tv_tensors.Mask`, optional `PaddingMask` of zeros). `segpaste/__init__.py` calls `faster_coco_eval.init_as_pycocotools()` at import time to shim the pycocotools API. `fiftyone` is an optional extra (`uv sync --extra coco`) used only by the COCO example.
+`CocoDetectionV2` wraps `faster_coco_eval`'s `COCO` and yields `(image, target_dict)` where `target_dict` is already shaped for transforms v2 (`tv_tensors.BoundingBoxes` in XYXY, `tv_tensors.Mask`, optional `PaddingMask` of zeros). `segpaste/__init__.py` calls `faster_coco_eval.init_as_pycocotools()` at import time to shim the pycocotools API. `fiftyone` is an optional extra (`uv sync --extra coco`) used by `create_coco_dataloader`.
 
 ## Public surface
 
@@ -69,7 +62,9 @@ Uses a Protocol + composition pattern: `PlacementGenerator` produces candidates,
 
 ## Testing
 
-- `tests/test_copy_paste_fuzz.py` and `tests/test_placement_fuzz.py` use Hypothesis; expect longer runtimes than unit tests.
+- `tests/strategies/` and `tests/invariants/` host the Hypothesis strategies and the `@pytest.mark.invariant` matrix that pins ADR-0001 per-modality invariants.
 - `tests/shared.py` provides canonical LSJ / resize transform pipelines — reuse these rather than rebuilding similar pipelines in new tests.
 - `tests/test_public_surface.py` enforces the ADR-pinned top-level API; see §Public surface.
+- `tests/test_compile_clean.py` runs `torch._dynamo.explain` on `BatchCopyPaste.forward` against a fixture batch and fails on any graph break outside `scripts/compile_allowlist.txt`.
+- `tests/test_batch_copy_paste_ks.py` is a soft-report KS gate against `tests/fixtures/ks_snapshot.pt` (frozen pre-deletion CPU-wrapper outputs); writes `ks_report/` as a CI artifact, no assertion at v0.3.0 (ADR-0008 §D6 burn-in).
 - `pytest` is configured with `--strict-markers --strict-config` and coverage always on; don't add ad-hoc markers without registering them.

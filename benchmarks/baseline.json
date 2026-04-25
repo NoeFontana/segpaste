@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "label": "CopyPasteCollator",
+  "label": "BatchCopyPaste",
   "device": "cpu",
   "cpu_model": "AMD EPYC-Milan Processor",
   "batch_size": 8,

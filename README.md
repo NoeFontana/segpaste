@@ -28,27 +28,30 @@ Convenience types and wrappers are provided to ease integration with `torchvisio
 - `CocoDetectionV2`: A CocoDetection dataset that presents an interface compatible with `torchvision.transforms.v2` and with support for padding masks.
 - `SanitizeBoundingBoxes`: A small wrapper around `torchvision.transforms.v2.SanitizeBoundingBoxes` that adds support for `PaddingMask`.
 
-### Collator
+### Batched augmentation
 
-The recommended interface is through the `CopyPasteCollator` which can be used in lieu of a standard collate function in a PyTorch `DataLoader` as long as the batch_size is greater than 1.
+`BatchCopyPaste` is the public entry point: an `nn.Module` that consumes a
+`PaddedBatchedDenseSample` and returns one. It is graph-compilable under
+`torch.compile(fullgraph=True)` and replaces the pre-v0.3.0 CPU collator
+plus all four modality-specific wrappers (instance, panoptic, depth-aware,
+classmix) with a single GPU-resident pipeline.
 
 ```python
-from segpaste import CopyPasteAugmentation, CopyPasteCollator, CopyPasteConfig
+import torch
+from torch.utils.data import DataLoader
 
-config = CopyPasteConfig()
-augmentation = CopyPasteAugmentation(config)
-collate_fn = CopyPasteCollator(augmentation)
-torch.utils.data.DataLoader(
-        dataset, # Your dataset here
-        batch_size=batch_size, # Must be > 1
-        collate_fn=collate_fn,
-    )
+from segpaste import BatchCopyPaste, BatchedDenseSample
 
+augment = BatchCopyPaste()
+loader = DataLoader(dataset, batch_size=8, collate_fn=list)
+
+for samples in loader:
+    padded = BatchedDenseSample.from_samples(samples).to_padded(max_instances=32)
+    padded = augment(padded, generator=torch.Generator(device=padded.images.device))
+    # padded is a PaddedBatchedDenseSample ready to feed your model
 ```
 
-Examples of usage can be found in the test suite.
-
-End-to-end examples of wiring `CopyPasteCollator` into a `DataLoader` can be found in the [examples](https://github.com/NoeFontana/segpaste/tree/main/examples).
+Usage examples live alongside the test suite (`tests/test_batch_copy_paste_shape.py`).
 
 ### Further
 

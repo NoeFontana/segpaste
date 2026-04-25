@@ -163,7 +163,7 @@ skip_covered = false
 show_missing = true
 
 [tool.pyright]
-include = ["src", "tests", "examples", "benchmarks"]
+include = ["src", "tests", "benchmarks"]
 pythonVersion = "3.11"
 pythonPlatform = "Linux"
 typeCheckingMode = "strict"
