@@ -29,6 +29,16 @@ from segpaste._internal.viz.pipeline import SampleOutcome
 from segpaste.types import DenseSample
 
 
+def sample_path(out_dir: Path, index: int, view: str) -> Path:
+    """Path of the per-sample drilldown tile under *out_dir*.
+
+    The ``samples/{index:04d}_{view}.png`` layout is owned by this
+    module; consumers (``fiftyone_export``) call this helper rather
+    than re-constructing the path so renames stay in one place.
+    """
+    return out_dir / "samples" / f"{index:04d}_{view}.png"
+
+
 def write_gallery(
     out_dir: Path,
     outcomes: list[SampleOutcome],
@@ -47,7 +57,7 @@ def write_gallery(
     all_ok = True
     for outcome in outcomes:
         for view, tile in outcome.drilldown.items():
-            tile_path = samples_dir / f"{outcome.index:04d}_{view}.png"
+            tile_path = sample_path(out_dir, outcome.index, view)
             _write_png(tile_path, tile)
             if not outcome.ok:
                 if all_ok:
