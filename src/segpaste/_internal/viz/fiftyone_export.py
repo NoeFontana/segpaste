@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import torch
 
 from segpaste._internal.imports import require_fiftyone
@@ -17,11 +16,6 @@ from segpaste.types import DenseSample
 
 if TYPE_CHECKING:
     import fiftyone as fo
-
-# Offset thing ids past the COCO panoptic stuff-class id space (≤200) so the
-# combined map disambiguates stuff classes (by category id) from thing
-# instances (by panoptic id) in a single 2D segmentation field.
-_PANOPTIC_THING_OFFSET = 256
 
 
 def _to_detections(sample: DenseSample) -> fo.Detections:
@@ -71,20 +65,20 @@ def _to_detections(sample: DenseSample) -> fo.Detections:
     return fo.Detections(detections=detections)
 
 
-def _to_panoptic_segmentation(sample: DenseSample) -> fo.Segmentation | None:
-    """Encode a panoptic-modality sample as an ``fo.Segmentation`` mask.
+def _to_thing_segmentation(sample: DenseSample) -> fo.Segmentation | None:
+    """Encode thing-instance ids as an ``fo.Segmentation`` mask.
 
-    Stuff pixels carry their semantic class id; thing pixels carry
-    ``_PANOPTIC_THING_OFFSET + panoptic_id`` so stuff classes and thing
-    instances are distinguishable in a single 2D label image.
+    Returns the ``panoptic_map`` directly: stuff pixels are ``0`` (rendered
+    as transparent background by FO) and each thing instance carries a
+    unique non-zero id. Stuff is intentionally dropped from the overlay —
+    panoptic-dense stuff coverage washes out the underlying image; the
+    interesting per-instance edits live in the thing channel.
     """
-    if sample.panoptic_map is None or sample.semantic_map is None:
+    if sample.panoptic_map is None:
         return None
     fo = require_fiftyone()
     pan = sample.panoptic_map.as_subclass(torch.Tensor).cpu().numpy()
-    sem = sample.semantic_map.as_subclass(torch.Tensor).cpu().numpy()
-    combined = np.where(pan > 0, _PANOPTIC_THING_OFFSET + pan, sem).astype(np.uint16)
-    return fo.Segmentation(mask=combined)
+    return fo.Segmentation(mask=pan.astype("uint16"))
 
 
 def build_dataset(
@@ -124,12 +118,12 @@ def build_dataset(
             "original_detections": _to_detections(outcome.before),
         }
 
-        panoptic = _to_panoptic_segmentation(outcome.after)
-        if panoptic is not None:
-            kwargs["panoptic_segmentation"] = panoptic
-            original_panoptic = _to_panoptic_segmentation(outcome.before)
-            if original_panoptic is not None:
-                kwargs["original_panoptic_segmentation"] = original_panoptic
+        thing_seg = _to_thing_segmentation(outcome.after)
+        if thing_seg is not None:
+            kwargs["thing_segmentation"] = thing_seg
+            original_thing_seg = _to_thing_segmentation(outcome.before)
+            if original_thing_seg is not None:
+                kwargs["original_thing_segmentation"] = original_thing_seg
 
         stats = compute_paste_stats(outcome.before, outcome.after)
         if stats is not None:
