@@ -19,11 +19,16 @@ from segpaste.types import Modality
 
 @pytest.fixture(autouse=True)
 def _isolate_registry() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
-    """Restore the module-level registry after each test."""
+    """Restore the module-level registry after each test.
+
+    Built-in presets are autoloaded by ``segpaste.presets`` at import time;
+    snapshot, clear, run, and restore so each test sees a clean registry.
+    """
     from segpaste import presets
 
     registry = presets._REGISTRY  # pyright: ignore[reportPrivateUsage]
     saved = dict(registry)
+    registry.clear()
     yield
     registry.clear()
     registry.update(saved)

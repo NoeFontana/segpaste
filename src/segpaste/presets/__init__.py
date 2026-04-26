@@ -44,3 +44,8 @@ def get_preset(name: str) -> PresetConfig:
 def list_presets() -> tuple[str, ...]:
     """Sorted tuple of registered preset names. The result is a value snapshot."""
     return tuple(sorted(_REGISTRY))
+
+
+# Side-effect imports register built-in presets — must follow the helpers above.
+import segpaste.presets.coco_instance  # noqa: E402  # pyright: ignore[reportUnusedImport]
+import segpaste.presets.coco_panoptic  # noqa: E402, F401  # pyright: ignore[reportUnusedImport]
