@@ -4,10 +4,10 @@
 | ---------- | --------------------------------------------------------------------------------------- |
 | Number     | 0006                                                                                    |
 | Title      | Panoptic-modality composite with stuff/thing gating and scatter-reduce collision policy |
-| Status     | Accepted                                                                                |
+| Status     | Implemented (P6, 2026-04-26)                                                            |
 | Author     | @NoeFontana                                                                             |
 | Created    | 2026-04-23                                                                              |
-| Updated    | 2026-04-23                                                                              |
+| Updated    | 2026-04-26                                                                              |
 | Tag        | `ADR-0006`                                                                              |
 | Relates-to | [ADR-0001](0001-dense-sample.md) Parts (ii), (iii); [ADR-0005](0005-dense-composite.md) |
 
@@ -237,3 +237,47 @@ integration-test work.
   construction is mathematically bijective. A post-hoc assert on every
   `transform` burns a full-frame reduction for no added safety.
   Debug mode keeps it as a fuzz-test harness opt-in.
+
+## Scope at implementation (P6, 2026-04-26)
+
+The P6 land integrates panoptic copy-paste into the GPU
+`BatchCopyPaste` pipeline (ADR-0008) rather than as a standalone
+`PanopticPaste` operator under `_internal`. The implementation pivots
+on these decisions, all narrower than what §1–§8 above describe:
+
+- **Composite policy**: the panoptic branch reuses the existing
+  `TileCompositor`'s later-wins semantics (`torch.where` per pixel
+  inside the paste mask). The full §3 `scatter_reduce('amax')`
+  class-priority arbitration is **deferred**. The local ritual
+  (ADR-0009 §5) on COCO panoptic showed no observable collision
+  pathologies that later-wins fails to handle. If a deployment
+  surfaces priority-bound collisions, a follow-up implements §3.
+- **Thing-only paste source** (§2): implemented as
+  `BatchCopyPaste._source_eligible(padded)`, gating placement-sampler
+  source rows via `torch.isin(labels, thing_classes)`. Stuff rows
+  remain in the target sample but cannot serve as paste sources.
+- **Stuff-area threshold** (§4): implemented as
+  `PanopticPasteConfig.tau_stuff_frac` (per-class minimum *remaining
+  fraction* after paste). The post-composite revert restores
+  `image`/`semantic_map`/`panoptic_map`/target-`instance_masks` on
+  pixels of any collapsed stuff class. The `Mapping[int, int]`
+  per-class threshold of §4 collapses to a single global fraction
+  in P6 — sufficient for COCO panoptic, generalizable later.
+- **Schema carrier**: `PanopticSchemaSpec` (a frozen Pydantic model
+  satisfying the `PanopticSchema` Protocol structurally) ships in
+  `src/segpaste/types/dense_sample.py` to let panoptic config travel
+  inside frozen `BatchCopyPasteConfig`. The Protocol is unchanged.
+- **Bijection enforcement** (§5): the existing tile-composite +
+  `instance_masks` survivor restoration is bijective by construction
+  on thing pixels. The `debug_assert_bijection` flag is not
+  implemented — `tests/test_panoptic_paste.py::TestPanopticInvariants`
+  asserts the four ADR-0001 §(ii) invariants directly on synthetic
+  fixtures.
+- **HuggingFace export** (§6): unchanged — already shipped pre-P6.
+- **Conflict resolution** (§3): not yet exercised in production —
+  every COCO-panoptic invariant test passes under later-wins.
+  Promotion to scatter_reduce is gated on a real failure mode.
+
+The four ADR-0001 §(ii) invariants pass on the synthetic
+`panoptic_stuff_and_things` fixture under
+`tests/test_panoptic_paste.py` and `tests/test_preset_coco_panoptic.py`.
