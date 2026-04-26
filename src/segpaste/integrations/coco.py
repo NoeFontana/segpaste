@@ -215,11 +215,11 @@ class CocoPanopticV2(VisionDataset):
             data: dict[str, Any] = json.load(f)
         self._panoptic_folder = panoptic_folder
         self._ignore_index = ignore_index
-        self._categories: dict[int, dict[str, Any]] = {
-            int(c["id"]): c for c in data["categories"]
+        self._thing_ids: set[int] = {
+            int(c["id"]) for c in data["categories"] if int(c.get("isthing", 0)) == 1
         }
-        self._images: dict[int, dict[str, Any]] = {
-            int(img["id"]): img for img in data["images"]
+        self._image_files: dict[int, str] = {
+            int(img["id"]): str(img["file_name"]) for img in data["images"]
         }
         self._annotations: dict[int, dict[str, Any]] = {
             int(a["image_id"]): a for a in data["annotations"]
@@ -236,11 +236,10 @@ class CocoPanopticV2(VisionDataset):
             )
 
         image_id = self._image_ids[index]
-        img_meta = self._images[image_id]
         ann = self._annotations[image_id]
 
         image: torch.Tensor = torchvision.io.decode_image(
-            os.path.join(self.root, img_meta["file_name"]),
+            os.path.join(self.root, self._image_files[image_id]),
             mode=torchvision.io.ImageReadMode.RGB,
         )
         pan_rgb = torchvision.io.decode_image(
@@ -263,7 +262,7 @@ class CocoPanopticV2(VisionDataset):
             cat_id = int(seg["category_id"])
             mask = seg_id == sid
             semantic[mask] = cat_id
-            if int(self._categories[cat_id].get("isthing", 0)) == 1:
+            if cat_id in self._thing_ids:
                 panoptic[mask] = next_thing_id
                 thing_masks.append(mask)
                 thing_labels.append(cat_id)
