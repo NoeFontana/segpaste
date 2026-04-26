@@ -97,11 +97,17 @@ def load_coco_panoptic_samples(
     """
     label_path = coco_dir / _PANOPTIC_ANN_FILENAME
     panoptic_dir = coco_dir / _PANOPTIC_DIRNAME
+    hint = (
+        "Rebuild the eval subset with "
+        "`scripts/build_eval_subset.py --include-panoptic` and re-push."
+    )
     if not label_path.is_file():
-        raise FileNotFoundError(f"COCO panoptic annotations not found at {label_path}.")
+        raise FileNotFoundError(
+            f"COCO panoptic annotations not found at {label_path}. {hint}"
+        )
     if not panoptic_dir.is_dir():
         raise FileNotFoundError(
-            f"COCO panoptic PNG directory not found at {panoptic_dir}."
+            f"COCO panoptic PNG directory not found at {panoptic_dir}. {hint}"
         )
     torch.manual_seed(seed)
     dataset = CocoPanopticV2(
