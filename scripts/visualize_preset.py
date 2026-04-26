@@ -10,17 +10,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import torch
 
-from segpaste._internal.viz.pipeline import SampleOutcome, run_preset
+from segpaste._internal.viz.pipeline import run_preset_batched
 from segpaste._internal.viz.synthetic import make_synthetic_samples
 from segpaste._internal.viz.writer import write_gallery
 from segpaste.augmentation.batch_copy_paste import BatchCopyPasteConfig
 from segpaste.presets import get_preset
-from segpaste.types import DenseSample
 
 _DEFAULT_SEED = 0xC0FFEE
 _DEFAULT_PRESET_LABEL = "default"
@@ -37,24 +35,6 @@ def _resolve_out_dir(out_dir: Path | None, preset_label: str) -> Path:
     if out_dir is not None:
         return out_dir
     return Path("local_gallery") / preset_label
-
-
-def _run(
-    config: BatchCopyPasteConfig,
-    samples: list[DenseSample],
-    *,
-    seed: int,
-    batch_size: int,
-    device: torch.device,
-) -> list[SampleOutcome]:
-    outcomes: list[SampleOutcome] = []
-    for start in range(0, len(samples), batch_size):
-        chunk = samples[start : start + batch_size]
-        chunk_out = run_preset(
-            config, chunk, seed=seed + start, device=device, force_overlap=False
-        )
-        outcomes.extend(replace(o, index=start + o.index) for o in chunk_out)
-    return outcomes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     samples = make_synthetic_samples(seed=args.seed, count=args.num_samples)
-    outcomes = _run(
+    outcomes = run_preset_batched(
         config,
         samples,
         seed=args.seed,

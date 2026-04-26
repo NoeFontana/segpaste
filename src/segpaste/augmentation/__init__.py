@@ -7,11 +7,13 @@ from segpaste.augmentation.lsj import (
     SanitizeBoundingBoxes,
     make_large_scale_jittering,
 )
+from segpaste.augmentation.sanitize import SanitizeInstances
 
 __all__ = [
     "BatchCopyPaste",
     "FixedSizeCrop",
     "RandomResize",
     "SanitizeBoundingBoxes",
+    "SanitizeInstances",
     "make_large_scale_jittering",
 ]
