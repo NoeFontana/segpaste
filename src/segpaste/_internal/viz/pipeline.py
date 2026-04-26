@@ -9,6 +9,7 @@ in the augmentation.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import torch
@@ -56,9 +57,11 @@ def run_preset(
         raise ValueError("samples must be non-empty")
 
     samples_dev = [_move_sample(s, device) for s in samples]
-    max_instances = max(s.boxes.shape[0] for s in samples_dev)
-    if max_instances == 0:
+    max_target = max(s.boxes.shape[0] for s in samples_dev)
+    if max_target == 0:
         raise ValueError("synthetic samples must carry at least one instance")
+    # 2x: target's own rows + worst-case full-batch paste from one source.
+    max_instances = 2 * max_target
 
     batched = BatchedDenseSample.from_samples(samples_dev)
     padded = batched.to_padded(max_instances=max_instances)
@@ -88,6 +91,31 @@ def run_preset(
                 drilldown=drilldown,
             )
         )
+    return outcomes
+
+
+def run_preset_batched(
+    config: BatchCopyPasteConfig,
+    samples: Sequence[DenseSample],
+    *,
+    seed: int,
+    batch_size: int,
+    device: torch.device,
+) -> list[SampleOutcome]:
+    """Run *config* over *samples* in chunks of *batch_size*.
+
+    Per-chunk seed is offset by ``chunk_start`` so adjacent chunks are
+    not bit-identical; outcome indices are remapped to the flat sample
+    position so artifacts land at ``samples/{i:04d}_*.png``.
+    """
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be positive, got {batch_size}")
+
+    outcomes: list[SampleOutcome] = []
+    for start in range(0, len(samples), batch_size):
+        chunk = list(samples[start : start + batch_size])
+        chunk_out = run_preset(config, chunk, seed=seed + start, device=device)
+        outcomes.extend(replace(o, index=start + o.index) for o in chunk_out)
     return outcomes
 
 

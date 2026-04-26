@@ -21,14 +21,17 @@ Pipeline (ADR-0008 §architecture):
 4. :class:`TileCompositor` performs the pixelwise where-composite in
    fixed-size tiles so activation memory scales with ``tile_size²``.
 
-Instance-row merging policy: output slot ``k`` carries the pasted row
-when ``paste_valid[b, k]`` is true, and the survivor-updated target
-row otherwise. Overflow beyond ``max_instances`` is not attempted —
-callers that require more capacity should widen ``K`` via
+Instance-row merging policy: target rows are preserved at their
+original slots; pasted source rows are compacted into the target's
+*free* slots (those where ``instance_valid`` was ``False``) in
+source-slot order. Surplus pastes are dropped when the target has
+no room — callers that require more headroom should widen ``K`` via
 :meth:`BatchedDenseSample.to_padded`.
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,6 +58,37 @@ class BatchCopyPasteConfig(BaseModel):
     composite: TileCompositorConfig = Field(default_factory=TileCompositorConfig)
     """Parameters for :class:`TileCompositor`."""
 
+    min_residual_area_frac: float = Field(default=0.1, ge=0.0, le=1.0)
+    """Drop a target instance when its survivor mask retains less than this
+    fraction of its original area. ``0.0`` keeps every target row regardless
+    of occlusion (legacy behavior); ``0.1`` matches the COCO eval ergonomics
+    of dropping ≥90%-occluded annotations. Mirrors the inverse of
+    :attr:`segpaste._internal.composite.CompositeConfig.occluded_area_threshold`
+    (``min_residual = 1 - occluded_threshold``)."""
+
+
+def drop_occluded_targets(
+    padded: PaddedBatchedDenseSample,
+    composited: PaddedBatchedDenseSample,
+    min_residual_area_frac: float,
+) -> PaddedBatchedDenseSample:
+    """Flip ``instance_valid`` to False for over-covered target rows.
+
+    Compares per-instance original area (``padded.instance_masks``) to
+    survivor area (``composited.instance_masks``, post tile-composite).
+    Rows with ``survivor / original < min_residual_area_frac`` are dropped.
+    """
+    if (
+        min_residual_area_frac <= 0.0
+        or padded.instance_masks is None
+        or composited.instance_masks is None
+    ):
+        return composited
+    orig = padded.instance_masks.flatten(2).sum(-1).to(torch.float32)
+    surv = composited.instance_masks.flatten(2).sum(-1).to(torch.float32)
+    keep = surv >= min_residual_area_frac * orig
+    return replace(composited, instance_valid=composited.instance_valid & keep)
+
 
 class BatchCopyPaste(nn.Module):
     """Graph-compilable batched copy-paste augmentation."""
@@ -76,11 +110,29 @@ class BatchCopyPaste(nn.Module):
         if padded.batch_size == 0:
             return padded
 
-        placement = self.placement_sampler(padded, generator)
+        valid_extent = self._valid_extent(padded)
+        placement = self.placement_sampler(padded, generator, valid_extent=valid_extent)
         warped = self.propagator(padded, placement)
         paste_mask = self._paste_mask(warped, placement)
         composited = self.compositor(padded, warped, paste_mask)
+        composited = drop_occluded_targets(
+            padded, composited, self.config.min_residual_area_frac
+        )
         return self._merge_slots(composited, warped, placement)
+
+    @staticmethod
+    def _valid_extent(padded: PaddedBatchedDenseSample) -> Tensor | None:
+        """Per-sample ``[B, 2]`` (h_v, w_v) bound on the unpadded image rect.
+
+        Assumes the LSJ convention of a top-left valid rect with bottom/right
+        zero-pad (:class:`FixedSizeCrop` via ``augmentation/lsj.py``).
+        """
+        if padded.padding_mask is None:
+            return None
+        not_pad = (~padded.padding_mask.as_subclass(Tensor)).squeeze(1)
+        h_v = not_pad.any(dim=-1).sum(dim=-1).to(torch.float32)
+        w_v = not_pad.any(dim=-2).sum(dim=-1).to(torch.float32)
+        return torch.stack([h_v, w_v], dim=-1)
 
     @staticmethod
     def _paste_mask(
@@ -106,28 +158,53 @@ class BatchCopyPaste(nn.Module):
         warped: PaddedBatchedDenseSample,
         placement: BatchedPlacement,
     ) -> PaddedBatchedDenseSample:
-        """Per-slot merge under ``paste_valid``.
+        """Compact paste rows into the target's free slots.
 
-        Slots where ``paste_valid`` is ``True`` receive the warped/pasted
-        row; the remaining slots keep the composited survivor row.
+        Output slot ``t`` carries the survivor-updated target row when
+        ``composited.instance_valid[t]`` is ``True``, otherwise it
+        receives the next pasted source row in source-slot order. When
+        the number of pastes exceeds the target's free slot count, the
+        surplus is dropped. The remap is computed via a ``[B, K, K]``
+        rank-equality match — graph-clean and inexpensive at COCO scale.
         """
         pv = placement.paste_valid  # [B, K]
-        pv2 = pv.unsqueeze(-1)  # [B, K, 1]
-        pv4 = pv.view(pv.shape[0], pv.shape[1], 1, 1)  # [B, K, 1, 1]
+        free = ~composited.instance_valid  # [B, K]
 
-        merged_masks = composited.instance_masks
-        if composited.instance_masks is not None and warped.instance_masks is not None:
-            merged_masks = torch.where(
-                pv4, warped.instance_masks, composited.instance_masks
-            )
+        # Pair the n-th free target slot with the n-th source paste slot via
+        # rank-equality. Ranks are unique per row, so each match row has
+        # at most one True; argmax then names the source slot to gather.
+        free_rank = free.long().cumsum(-1) - 1
+        paste_rank = pv.long().cumsum(-1) - 1
+        match = (
+            free.unsqueeze(-1)
+            & pv.unsqueeze(-2)
+            & (free_rank.unsqueeze(-1) == paste_rank.unsqueeze(-2))
+        )  # [B, K_t, K_s]
+        receives = match.any(dim=-1)  # [B, K]
+        # argmax returns 0 where no match — guarded by `receives` in `where`.
+        src_k = match.long().argmax(dim=-1)
 
-        merged_ids = composited.instance_ids
-        if composited.instance_ids is not None and warped.instance_ids is not None:
-            merged_ids = torch.where(pv, warped.instance_ids, composited.instance_ids)
+        b, k = pv.shape
+        batch_idx = torch.arange(b, device=pv.device).unsqueeze(-1).expand(b, k)
 
-        merged_boxes = torch.where(pv2, warped.boxes, composited.boxes)
-        merged_labels = torch.where(pv, warped.labels, composited.labels)
-        merged_valid = composited.instance_valid | pv
+        def gather(src: Tensor, dst: Tensor) -> Tensor:
+            sel = receives.view(b, k, *([1] * (src.ndim - 2)))
+            return torch.where(sel, src[batch_idx, src_k], dst)
+
+        merged_boxes = gather(warped.boxes, composited.boxes)
+        merged_labels = gather(warped.labels, composited.labels)
+        merged_masks = (
+            gather(warped.instance_masks, composited.instance_masks)
+            if warped.instance_masks is not None
+            and composited.instance_masks is not None
+            else composited.instance_masks
+        )
+        merged_ids = (
+            gather(warped.instance_ids, composited.instance_ids)
+            if warped.instance_ids is not None and composited.instance_ids is not None
+            else composited.instance_ids
+        )
+        merged_valid = composited.instance_valid | receives
 
         return PaddedBatchedDenseSample(
             images=composited.images,
