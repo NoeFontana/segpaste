@@ -194,6 +194,33 @@ Translation is integer-pixel by construction (sampled from integer
 grids); the `align_corners=False` + integer-translation convention
 prevents `grid_sample`'s nearest-mode from flipping boundary pixels.
 
+### 5b. Row merging: compact pastes into the target's free slots
+
+`BatchCopyPaste._merge_slots` reconciles the survivor-updated target
+rows from the tile compositor with the warped source rows from the
+propagator. Output slot `t` carries the survivor target row when
+`composited.instance_valid[t]` is `True`; otherwise it receives the
+next pasted source row in source-slot order. Surplus pastes (when the
+target has no free slots left) are dropped.
+
+Mechanically: rank each free target slot among free slots and each
+source slot among pastes via `cumsum`, then build a `[B, K, K]` boolean
+match matrix `free_t & paste_s & (rank_t == rank_s)`. Each row of the
+match has at most one `True` (ranks are unique within their row), so a
+single `argmax`-then-`gather` writes the paste rows into their free-slot
+destinations. All ops (`cumsum`, `==`, `&`, `any`, `argmax`, integer
+indexing, `where`) are graph-clean.
+
+The original positional-replacement merge (output slot `k` ← warped
+slot `k` whenever `paste_valid[b, k]`) silently overwrote the target's
+first `S` rows with the source's `S` rows whenever both were stored at
+slots `0..N-1`. The compact policy preserves the target's instance set
+and is what `tests/test_batch_copy_paste_lsj.py::TestSlotMerge` pins.
+Caller responsibility: pad with `max_instances >= max(target_count) +
+max(source_count)` to guarantee no surplus drop; the visualizer
+pipeline at `src/segpaste/_internal/viz/pipeline.py` uses
+`2 * max(target_count)` as a safe bound.
+
 ### 6. KS statistical-equivalence gate: soft-report for 30 days, then harden
 
 Bitwise CPU↔GPU parity is not required; numerical drift from
