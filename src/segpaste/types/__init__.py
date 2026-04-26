@@ -13,6 +13,7 @@ from segpaste.types.dense_sample import (
     Modality,
     PanopticMap,
     PanopticSchema,
+    PanopticSchemaSpec,
     SemanticMap,
 )
 from segpaste.types.padded_batched_dense_sample import PaddedBatchedDenseSample
@@ -37,5 +38,6 @@ __all__ = [
     "PaddingMask",
     "PanopticMap",
     "PanopticSchema",
+    "PanopticSchemaSpec",
     "SemanticMap",
 ]

@@ -1,5 +1,3 @@
-from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Literal
 
 import torch
@@ -13,23 +11,9 @@ from segpaste.types import (
     DenseSample,
     InstanceMask,
     PanopticMap,
-    PanopticSchema,
+    PanopticSchemaSpec,
     SemanticMap,
 )
-
-
-@dataclass
-class FakePanopticSchema:
-    """Lightweight :class:`PanopticSchema` stand-in for tests.
-
-    Avoids importing the production schema type's full validation surface
-    when a test just needs the protocol fields (``classes``, ``ignore_index``,
-    ``max_instances_per_image``).
-    """
-
-    classes: Mapping[int, Literal["thing", "stuff"]]
-    ignore_index: int
-    max_instances_per_image: int
 
 
 def make_disjoint_panoptic_sample(seed: int = 0) -> DenseSample:
@@ -70,12 +54,16 @@ def make_disjoint_panoptic_sample(seed: int = 0) -> DenseSample:
     )
 
 
-def make_thing_stuff_schema() -> PanopticSchema:
+def make_thing_stuff_schema(
+    classes: dict[int, Literal["thing", "stuff"]] | None = None,
+    *,
+    max_instances_per_image: int = 256,
+) -> PanopticSchemaSpec:
     """Schema for :func:`make_disjoint_panoptic_sample` (class 0 stuff, 1+ thing)."""
-    return FakePanopticSchema(
-        classes={0: "stuff", 1: "thing", 2: "thing"},
+    return PanopticSchemaSpec(
+        classes=classes or {0: "stuff", 1: "thing", 2: "thing"},
         ignore_index=255,
-        max_instances_per_image=256,
+        max_instances_per_image=max_instances_per_image,
     )
 
 

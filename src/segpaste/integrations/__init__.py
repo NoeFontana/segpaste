@@ -5,11 +5,13 @@
 # from __all__.
 from segpaste.integrations.coco import (
     CocoDetectionV2,
+    CocoPanopticV2,
     create_coco_dataloader,
 )
 from segpaste.integrations.coco import labels_getter as labels_getter
 
 __all__ = [
     "CocoDetectionV2",
+    "CocoPanopticV2",
     "create_coco_dataloader",
 ]

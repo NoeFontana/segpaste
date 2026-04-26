@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 
 from segpaste._internal.imports import require_fiftyone
@@ -65,6 +66,24 @@ def _to_detections(sample: DenseSample) -> fo.Detections:
     return fo.Detections(detections=detections)
 
 
+def _to_stuff_segmentation(sample: DenseSample) -> fo.Segmentation | None:
+    """Encode stuff regions as an ``fo.Segmentation`` keyed by category id.
+
+    Things and stuff route to different FO primitives so the two layers
+    cover disjoint pixels: things are countable and go through
+    ``Detections`` (per-instance bbox + mask), stuff is uncountable and
+    is best read as a per-pixel category fill. We zero thing pixels here
+    so the Segmentation overlay does not double-paint regions already
+    rendered by ``detections``.
+    """
+    if sample.panoptic_map is None or sample.semantic_map is None:
+        return None
+    fo = require_fiftyone()
+    pan = sample.panoptic_map.as_subclass(torch.Tensor).cpu().numpy()
+    sem = sample.semantic_map.as_subclass(torch.Tensor).cpu().numpy()
+    return fo.Segmentation(mask=np.where(pan == 0, sem, 0).astype(np.uint16))
+
+
 def build_dataset(
     *,
     out_dir: Path,
@@ -80,10 +99,12 @@ def build_dataset(
     its UI rather than baking pixels. ``orig`` and ``overlay`` (diff)
     paths are exposed as ``original_filepath`` / ``overlay_filepath``,
     and the pre-augmentation instance fields are mirrored as
-    ``original_detections``. Per-sample invariant outcomes and paste
-    stats are populated as filterable fields. *info* is assigned to
-    ``dataset.info`` verbatim; persistence (``dataset.save()``) is the
-    caller's job.
+    ``original_detections``. Panoptic samples additionally carry a
+    ``stuff_segmentation`` (and ``original_stuff_segmentation``) keyed
+    by category id with thing pixels zeroed. Per-sample invariant
+    outcomes and paste stats are populated as filterable fields.
+    *info* is assigned to ``dataset.info`` verbatim; persistence
+    (``dataset.save()``) is the caller's job.
     """
     fo = require_fiftyone()
 
@@ -101,6 +122,13 @@ def build_dataset(
             "detections": _to_detections(outcome.after),
             "original_detections": _to_detections(outcome.before),
         }
+
+        stuff_seg = _to_stuff_segmentation(outcome.after)
+        if stuff_seg is not None:
+            kwargs["stuff_segmentation"] = stuff_seg
+            original_stuff_seg = _to_stuff_segmentation(outcome.before)
+            if original_stuff_seg is not None:
+                kwargs["original_stuff_segmentation"] = original_stuff_seg
 
         stats = compute_paste_stats(outcome.before, outcome.after)
         if stats is not None:

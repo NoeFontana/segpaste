@@ -57,6 +57,15 @@ def main(argv: list[str] | None = None) -> int:
         default="synthetic",
         help="Sample source. 'coco' pulls a seeded COCO val2017 subset.",
     )
+    parser.add_argument(
+        "--task",
+        choices=["detection", "panoptic"],
+        default="detection",
+        help=(
+            "COCO task. 'detection' loads instance annotations; 'panoptic' "
+            "loads panoptic_*.json + panoptic PNGs. Ignored for synthetic."
+        ),
+    )
     parser.add_argument("--num-samples", type=int, default=8)
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
     parser.add_argument("--out-dir", type=Path, default=None)
@@ -118,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     samples: list[DenseSample]
     if args.source == "coco":
         from segpaste._internal.viz.coco_source import (
+            load_coco_panoptic_samples,
             load_coco_samples,
             resolve_coco_dir,
         )
@@ -126,7 +136,10 @@ def main(argv: list[str] | None = None) -> int:
             hf_repo=None if args.coco_local else args.coco_hf_repo,
             local=args.coco_local,
         )
-        samples = load_coco_samples(
+        loader = (
+            load_coco_panoptic_samples if args.task == "panoptic" else load_coco_samples
+        )
+        samples = loader(
             coco_dir,
             count=args.num_samples,
             image_size=args.coco_image_size,

@@ -7,7 +7,7 @@
 | Status     | Accepted                                                                                |
 | Author     | @NoeFontana                                                                             |
 | Created    | 2026-04-23                                                                              |
-| Updated    | 2026-04-23                                                                              |
+| Updated    | 2026-04-26                                                                              |
 | Tag        | `ADR-0008`                                                                              |
 | Relates-to | [ADR-0002](0002-performance-baseline.md) Part (iv); [ADR-0003](0003-hard-deprecation-stance.md); [ADR-0004](0004-batched-dense-sample.md); [ADR-0005](0005-dense-composite.md); [ADR-0006](0006-panoptic-paste.md); [ADR-0007](0007-depth-aware-paste.md) |
 | Amends     | [ADR-0002](0002-performance-baseline.md) Part (iv) → Part (v) (GPU throughput lane)     |
@@ -415,3 +415,27 @@ against the new minor — tracked as a follow-up, not blocked on W5.
   Discarded: the allow-list is load-bearing CI state; it needs to live
   next to the script that reads it, not in documentation that could
   drift.
+
+## Additive amendments (P5/P6, 2026-04-26)
+
+Three additive fields land alongside the ADR-0009 preset registry. All
+defaults preserve pre-amendment behavior bitwise; the compile-clean gate
+(§7) stays empty-allow-listed.
+
+- `BatchedPlacementConfig.paste_prob: float = 1.0` — per-image
+  Bernoulli gate ANDed into `paste_valid`. Default `1.0` is a no-op.
+- `BatchedPlacementConfig.k_range: tuple[int, int] = (1, 256)` — per-
+  image cap on the number of pasted slots. Implemented as a
+  `randint([k_lo, k_hi])` per image and a `paste_valid.cumsum`-rank
+  truncation. Default upper bound matches the panoptic schema's
+  `max_instances_per_image`, so existing call sites observe no change.
+- `BatchCopyPasteConfig.panoptic: PanopticPasteConfig | None = None`
+  — when set, gates source rows to thing-only (`torch.isin` against
+  the schema's thing classes) and applies the post-composite stuff-
+  area-threshold revert (ADR-0006 amendment §"Scope at implementation").
+  `None` default leaves the augmentation panoptic-agnostic.
+
+These fields are not re-exported on `segpaste.__all__` directly —
+they're nested config attributes — so the ADR-0001 Part (i) public
+surface contract is unchanged. The KS soft-report (§D6) absorbs the
+default-equivalence claim.

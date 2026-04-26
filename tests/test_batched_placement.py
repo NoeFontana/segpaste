@@ -267,3 +267,65 @@ class TestValidExtent:
         assert torch.equal(a.scale, b.scale)
         assert torch.equal(a.hflip, b.hflip)
         assert torch.equal(a.paste_valid, b.paste_valid)
+
+
+class TestPasteProb:
+    def test_paste_prob_zero_clears_all(self) -> None:
+        padded = _padded(b=8, k=5)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0), paste_prob=0.0)
+        )
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        assert not bool(out.paste_valid.any())
+
+    def test_paste_prob_one_is_no_op(self) -> None:
+        padded = _padded(b=4, k=5)
+        baseline = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0))
+        )
+        gated = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0), paste_prob=1.0)
+        )
+        a = baseline(padded, torch.Generator().manual_seed(7))
+        b = gated(padded, torch.Generator().manual_seed(7))
+        assert torch.equal(a.paste_valid, b.paste_valid)
+
+
+class TestKRange:
+    def test_k_range_truncates_to_cap(self) -> None:
+        padded = _padded(b=4, k=5)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0), k_range=(2, 2))
+        )
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        per_image = out.paste_valid.sum(dim=-1)
+        assert bool((per_image <= 2).all())
+
+    def test_k_range_zero_clears_all(self) -> None:
+        padded = _padded(b=4, k=5)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0), k_range=(0, 0))
+        )
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        assert not bool(out.paste_valid.any())
+
+
+class TestSourceEligible:
+    def test_ineligible_sources_clear_paste_valid(self) -> None:
+        padded = _padded(b=4, k=5)
+        # Mark all source rows as ineligible — paste_valid must collapse.
+        ineligible = torch.zeros_like(padded.instance_valid)
+        sampler = _sampler()
+        out = sampler(
+            padded,
+            torch.Generator().manual_seed(0),
+            source_eligible=ineligible,
+        )
+        assert not bool(out.paste_valid.any())
+
+    def test_none_recovers_default_behavior(self) -> None:
+        padded = _padded(b=4, k=5)
+        sampler = _sampler(scale_range=(0.5, 1.5))
+        a = sampler(padded, torch.Generator().manual_seed(11), source_eligible=None)
+        b = sampler(padded, torch.Generator().manual_seed(11))
+        assert torch.equal(a.paste_valid, b.paste_valid)

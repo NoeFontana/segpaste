@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Callable
 from typing import Any, cast
@@ -8,10 +9,11 @@ from faster_coco_eval import COCO
 from faster_coco_eval import mask as coco_mask
 from torchvision import tv_tensors
 from torchvision.datasets import VisionDataset
+from torchvision.ops import masks_to_boxes
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F
 
-from segpaste.types import DenseSample, InstanceMask
+from segpaste.types import DenseSample, InstanceMask, PanopticMap, SemanticMap
 from segpaste.types.data_structures import PaddingMask
 
 
@@ -182,6 +184,138 @@ class CocoDetectionV2(VisionDataset):
             instance_ids=instance_ids,
             instance_masks=instance_masks,
             padding_mask=padding_mask,
+        )
+
+
+class CocoPanopticV2(VisionDataset):
+    """COCO panoptic loader.
+
+    Reads ``panoptic_*.json`` (per-image ``segments_info`` records) plus the
+    PNG-encoded panoptic maps under ``panoptic_*/`` and emits a
+    :class:`DenseSample` carrying ``image``, ``instance_masks`` (thing
+    instances only), ``labels``, ``instance_ids``, ``boxes``, ``semantic_map``,
+    ``panoptic_map`` and a zero-valued ``padding_mask``.
+
+    Per ADR-0001 §(ii), ``panoptic_map`` encodes stuff pixels as ``0`` and
+    every thing instance with a unique non-zero id; ``semantic_map`` carries
+    the COCO category id per pixel (with ``schema.ignore_index`` on
+    unlabelled void).
+    """
+
+    def __init__(
+        self,
+        image_folder: str,
+        panoptic_folder: str,
+        label_path: str,
+        transforms: Callable | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        ignore_index: int = 255,
+    ):
+        super().__init__(root=image_folder, transforms=transforms)
+        with open(label_path) as f:
+            data: dict[str, Any] = json.load(f)
+        self._panoptic_folder = panoptic_folder
+        self._ignore_index = ignore_index
+        self._thing_ids: set[int] = {
+            int(c["id"]) for c in data["categories"] if int(c.get("isthing", 0)) == 1
+        }
+        self._image_files: dict[int, str] = {
+            int(img["id"]): str(img["file_name"]) for img in data["images"]
+        }
+        self._annotations: dict[int, dict[str, Any]] = {
+            int(a["image_id"]): a for a in data["annotations"]
+        }
+        self._image_ids: list[int] = sorted(self._annotations.keys())
+
+    def __len__(self) -> int:
+        return len(self._image_ids)
+
+    def __getitem__(self, index: int) -> DenseSample:
+        if not isinstance(index, int):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ValueError(
+                f"Index must be of type integer, got {type(index)} instead."
+            )
+
+        image_id = self._image_ids[index]
+        ann = self._annotations[image_id]
+
+        image: torch.Tensor = torchvision.io.decode_image(
+            os.path.join(self.root, self._image_files[image_id]),
+            mode=torchvision.io.ImageReadMode.RGB,
+        )
+        pan_rgb = torchvision.io.decode_image(
+            os.path.join(self._panoptic_folder, ann["file_name"]),
+            mode=torchvision.io.ImageReadMode.RGB,
+        ).to(torch.int64)
+        # Per the COCO panoptic spec (https://cocodataset.org/#panoptic-2018),
+        # segment ids are encoded into the PNG channels as id = R + 256*G + 256^2*B.
+        seg_id = pan_rgb[0] + pan_rgb[1] * 256 + pan_rgb[2] * (256 * 256)
+
+        h, w = seg_id.shape
+        canvas_size = (h, w)
+        semantic = torch.full((h, w), self._ignore_index, dtype=torch.int64)
+        panoptic = torch.zeros((h, w), dtype=torch.int64)
+        thing_masks: list[torch.Tensor] = []
+        thing_labels: list[int] = []
+        next_thing_id = 1
+        for seg in ann["segments_info"]:
+            sid = int(seg["id"])
+            cat_id = int(seg["category_id"])
+            mask = seg_id == sid
+            semantic[mask] = cat_id
+            if cat_id in self._thing_ids:
+                panoptic[mask] = next_thing_id
+                thing_masks.append(mask)
+                thing_labels.append(cat_id)
+                next_thing_id += 1
+
+        if thing_masks:
+            masks_t = torch.stack(thing_masks).to(torch.bool)
+            labels_t = torch.tensor(thing_labels, dtype=torch.int64)
+            boxes_t = masks_to_boxes(masks_t).to(torch.float32)
+        else:
+            masks_t = torch.zeros((0, h, w), dtype=torch.bool)
+            labels_t = torch.zeros((0,), dtype=torch.int64)
+            boxes_t = torch.zeros((0, 4), dtype=torch.float32)
+
+        target: dict[str, Any] = {
+            "image_id": image_id,
+            "boxes": tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+                boxes_t,
+                format=tv_tensors.BoundingBoxFormat.XYXY,
+                canvas_size=canvas_size,
+            ),
+            "labels": labels_t,
+            "masks": tv_tensors.Mask(masks_t),
+            "semantic_map": SemanticMap(semantic),
+            "panoptic_map": PanopticMap(panoptic),
+            "padding_mask": PaddingMask(
+                torch.zeros((1, *canvas_size), dtype=torch.bool)
+            ),
+        }
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, target)
+
+        labels_tensor = cast(torch.Tensor, target["labels"])
+        boxes_tv = cast(tv_tensors.BoundingBoxes, target["boxes"])
+        masks_tv = cast(tv_tensors.Mask, target["masks"])
+        semantic_tv = cast(torch.Tensor, target["semantic_map"])
+        panoptic_tv = cast(torch.Tensor, target["panoptic_map"])
+        padding_tv = cast(PaddingMask, target["padding_mask"])
+
+        wrapped_image = (
+            image if isinstance(image, tv_tensors.Image) else tv_tensors.Image(image)
+        )
+        instance_count = labels_tensor.size(0)
+        return DenseSample(
+            image=wrapped_image,
+            boxes=boxes_tv,
+            labels=labels_tensor,
+            instance_ids=torch.arange(instance_count, dtype=torch.int32),
+            instance_masks=InstanceMask(masks_tv.to(torch.bool)),
+            semantic_map=SemanticMap(semantic_tv.to(torch.int64)),
+            panoptic_map=PanopticMap(panoptic_tv.to(torch.int64)),
+            padding_mask=padding_tv,
         )
 
 

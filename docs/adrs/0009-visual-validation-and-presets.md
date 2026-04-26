@@ -137,6 +137,14 @@ metadata (torch version, seed, sample count, ISO date of the local
 ritual). It is a *value*, not a co-author credit — see §5 on why the
 docstring-stamping pattern is rejected.
 
+**Note (P6 amendment, 2026-04-26).** `BatchCopyPasteConfig` carries a
+new optional `panoptic: PanopticPasteConfig | None = None` field per
+the ADR-0008 amendment. Presets that target panoptic semantics (e.g.,
+`coco-panoptic`) populate it; instance-only presets leave it `None`.
+This is the first concrete demonstration of the §3 additive-field
+contract — `BatchCopyPasteConfig` grew, `PresetConfig` did not, and
+existing presets pin no panoptic-specific fields by default.
+
 ### 4. Binary-file CI guard
 
 `scripts/check_no_binaries.py`:

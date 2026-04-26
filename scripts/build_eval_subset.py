@@ -24,6 +24,9 @@ _VAL_IMAGES_URL = "http://images.cocodataset.org/zips/val2017.zip"
 _ANNOTATIONS_URL = (
     "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
 )
+_PANOPTIC_URL = (
+    "http://images.cocodataset.org/annotations/panoptic_annotations_trainval2017.zip"
+)
 _DEFAULT_NUM = 200
 _DEFAULT_SEED = 0xC0FFEE
 _DEFAULT_HF_REPO = "NoeFontana/segpaste-eval-data"
@@ -79,6 +82,28 @@ def _ensure_coco(coco_root: Path) -> tuple[Path, Path]:
     return images_dir, ann_path
 
 
+def _ensure_coco_panoptic(coco_root: Path) -> tuple[Path, Path]:
+    """Ensure panoptic JSON + per-image PNGs are unpacked under *coco_root*.
+
+    The upstream archive nests a second zip — outer extracts the JSONs and
+    the inner ``panoptic_val2017.zip`` whose contents (one PNG per image)
+    are unpacked into ``annotations/panoptic_val2017/``.
+    """
+    annotations = coco_root / "annotations"
+    pan_json = annotations / "panoptic_val2017.json"
+    pan_png_dir = annotations / "panoptic_val2017"
+    archives = coco_root / "_archives"
+    _download(_PANOPTIC_URL, archives / "panoptic_annotations_trainval2017.zip")
+    _extract(archives / "panoptic_annotations_trainval2017.zip", pan_json, coco_root)
+    inner = annotations / "panoptic_val2017.zip"
+    if not inner.is_file():
+        raise FileNotFoundError(
+            f"Expected nested panoptic zip at {inner}; outer archive layout changed?"
+        )
+    _extract(inner, pan_png_dir, annotations)
+    return pan_json, pan_png_dir
+
+
 def _select_image_ids(
     ann_path: Path, num: int, seed: int
 ) -> tuple[list[int], dict[str, Any]]:
@@ -126,7 +151,67 @@ def _filter_and_write(
     print(f"[wrote] {ann_out.name} ({len(filtered_anns)} annotations)")
 
 
-def _write_readme(out_dir: Path, *, num: int, seed: int, fingerprint: str) -> None:
+def _filter_and_write_panoptic(
+    *,
+    chosen_ids: list[int],
+    pan_json_path: Path,
+    pan_png_dir: Path,
+    out_dir: Path,
+) -> None:
+    chosen_set = set(chosen_ids)
+    print(f"[load] {pan_json_path.name}")
+    with pan_json_path.open() as f:
+        full_data: dict[str, Any] = json.load(f)
+
+    filtered_images = [im for im in full_data["images"] if im["id"] in chosen_set]
+    filtered_anns = [a for a in full_data["annotations"] if a["image_id"] in chosen_set]
+    missing = chosen_set - {a["image_id"] for a in filtered_anns}
+    if missing:
+        raise ValueError(
+            f"{len(missing)} chosen image_ids lack panoptic annotations: "
+            f"{sorted(missing)[:5]}..."
+        )
+
+    subset = {
+        "info": full_data.get("info", {}),
+        "licenses": full_data.get("licenses", []),
+        "categories": full_data["categories"],
+        "images": filtered_images,
+        "annotations": filtered_anns,
+    }
+    ann_out = out_dir / "panoptic_val2017.json"
+    with ann_out.open("w") as f:
+        json.dump(subset, f)
+    print(f"[wrote] {ann_out.name} ({len(filtered_anns)} segments_info entries)")
+
+    png_out = out_dir / "panoptic_val2017"
+    if png_out.exists():
+        shutil.rmtree(png_out)
+    png_out.mkdir(parents=True)
+    print(f"[copy] {len(filtered_anns)} panoptic PNGs -> {png_out}")
+    for ann in filtered_anns:
+        shutil.copy2(pan_png_dir / ann["file_name"], png_out / ann["file_name"])
+
+
+def _write_readme(
+    out_dir: Path, *, num: int, seed: int, fingerprint: str, with_panoptic: bool
+) -> None:
+    panoptic_layout = (
+        "panoptic_val2017.json          # filtered COCO panoptic segments_info\n"
+        f"panoptic_val2017/*.png        # {num} PNGs, COCO id-encoded panoptic maps\n"
+        if with_panoptic
+        else ""
+    )
+    panoptic_usage = (
+        "\nOr the panoptic preset:\n\n"
+        "```bash\n"
+        "uv run --group viewer --group eval python scripts/fiftyone_app.py \\\n"
+        f"    --source coco --task panoptic --num-samples {num} \\\n"
+        "    --preset coco-panoptic\n"
+        "```\n"
+        if with_panoptic
+        else ""
+    )
     body = f"""---
 license: cc-by-4.0
 task_categories:
@@ -157,7 +242,7 @@ A {num}-image seeded subset of COCO val2017, used by
 ```
 images/*.jpg                  # {num} JPEGs, original COCO filenames
 instances_val2017_subset.json # COCO-format annotations for the subset
-```
+{panoptic_layout}```
 
 ## Usage
 
@@ -175,7 +260,7 @@ Or via the visual viewer (no manual download):
 uv run --group viewer --group eval python scripts/fiftyone_app.py \\
     --source coco --num-samples {num} --preset <name>
 ```
-"""
+{panoptic_usage}"""
     (out_dir / "README.md").write_text(body)
     print("[wrote] README.md")
 
@@ -224,6 +309,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Build the local subset and exit; do not push to HF.",
     )
+    parser.add_argument(
+        "--include-panoptic",
+        action="store_true",
+        help=(
+            "Also fetch panoptic_annotations_trainval2017.zip and emit "
+            "panoptic_val2017.json + panoptic_val2017/*.png alongside the "
+            "instance subset (~800MB additional download)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.num_samples <= 0:
@@ -242,11 +336,20 @@ def main(argv: list[str] | None = None) -> int:
         src_images=coco_images,
         out_dir=args.out_dir,
     )
+    if args.include_panoptic:
+        pan_json, pan_png_dir = _ensure_coco_panoptic(args.coco_root)
+        _filter_and_write_panoptic(
+            chosen_ids=chosen,
+            pan_json_path=pan_json,
+            pan_png_dir=pan_png_dir,
+            out_dir=args.out_dir,
+        )
     _write_readme(
         args.out_dir,
         num=args.num_samples,
         seed=args.seed,
         fingerprint=_fingerprint(chosen),
+        with_panoptic=args.include_panoptic,
     )
 
     if args.no_push:
