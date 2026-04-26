@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 from torchvision import tv_tensors
 
@@ -12,6 +14,7 @@ from segpaste.types import (
     DenseSample,
     InstanceMask,
     PaddedBatchedDenseSample,
+    PaddingMask,
     PanopticMap,
     SemanticMap,
 )
@@ -191,6 +194,41 @@ class TestZTestDepth:
         assert torch.equal(
             out.images.as_subclass(torch.Tensor),
             target.images.as_subclass(torch.Tensor),
+        )
+
+
+class TestSourcePaddingMask:
+    def test_pad_pixels_keep_target_inside_pad_overlap(self) -> None:
+        """Source-pad regions in the paste mask must not leak zeros into the output."""
+        target = _padded(b=1, k=2, seed_base=0)
+        source = _padded(b=1, k=2, seed_base=10)
+        src_pad = torch.zeros(1, 1, H, W, dtype=torch.bool)
+        src_pad[..., H // 2 :, W // 2 :] = True
+        source_with_pad = replace(source, padding_mask=PaddingMask.from_tensor(src_pad))
+        pm = torch.ones(1, H, W, dtype=torch.bool)
+        out = TileCompositor()(target, source_with_pad, pm)
+        out_t = out.images.as_subclass(torch.Tensor)
+        tgt_t = target.images.as_subclass(torch.Tensor)
+        src_t = source.images.as_subclass(torch.Tensor)
+        m_pad3 = src_pad.squeeze(1).unsqueeze(1).expand_as(out_t)
+        assert torch.equal(out_t[m_pad3], tgt_t[m_pad3])
+        assert torch.equal(out_t[~m_pad3], src_t[~m_pad3])
+
+    def test_pad_overlap_with_tiling_matches_single_tile(self) -> None:
+        """Source-pad gating must be tile-invariant."""
+        target = _padded(b=2, k=3, seed_base=0)
+        source = _padded(b=2, k=3, seed_base=10)
+        src_pad = torch.zeros(2, 1, H, W, dtype=torch.bool)
+        src_pad[..., H // 2 :, :] = True
+        source_with_pad = replace(source, padding_mask=PaddingMask.from_tensor(src_pad))
+        pm = _paste_mask(2)
+        single = TileCompositor(TileCompositorConfig(tile_size=max(H, W)))
+        tiled = TileCompositor(TileCompositorConfig(tile_size=16))
+        out_single = single(target, source_with_pad, pm)
+        out_tiled = tiled(target, source_with_pad, pm)
+        assert torch.equal(
+            out_single.images.as_subclass(torch.Tensor),
+            out_tiled.images.as_subclass(torch.Tensor),
         )
 
 

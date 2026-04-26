@@ -76,6 +76,34 @@ invalidate an un-touched target pixel — an unintended regression. ADR-0001
 `tests/invariants/depth.py::assert_depth_validity_join` is updated to
 take `effective_paste_mask` and assert the piecewise formula.
 
+#### 2a. Generalization to all per-pixel validity signals (ADR-0008 amendment)
+
+The piecewise validity formula is not specific to depth. It applies to
+every per-pixel validity signal carried on a `DenseSample`. Two
+instances exist today:
+
+* `depth_valid` — gates pixel-level depth measurements (this ADR's §2).
+* `image_valid := ~padding_mask` — derived from `PaddingMask`. Marks
+  which pixels of a sample carry real image content rather than
+  pad introduced by `FixedSizeCrop` / LSJ. Composites must not pull
+  source-pad zeros into pasted regions, and placements must not be
+  drawn over target pad. Both gates fold into `M_eff` symmetrically:
+  `M_eff = paste_mask ∧ (z-test) ∧ image_valid_src` (ADR-0008 §C5,
+  `_internal/composite.py::_effective_mask`,
+  `_internal/gpu/tile_composite.py::_effective_mask`). The placement
+  side consults the equivalent `valid_extent` reduction
+  (`BatchCopyPaste._valid_extent`) so translates land inside the
+  target's valid rect, and discards source rows whose bbox extends
+  past the source's valid extent.
+
+Future per-pixel validity signals (e.g. semantic-confidence mask,
+amodal-occlusion mask) plug into the same machinery: warp under the
+same `grid_sample(mode="nearest", padding_mode="zeros")` template used
+for `depth_valid`, AND into `M_eff` at composite time, optionally
+contribute to `valid_extent` at placement time. No new ADR is required
+for additional per-pixel signals — this generalization is the
+architectural commitment.
+
 ### 3. Depth composite reuses `_effective_mask`
 
 The z-test is already correct in `_effective_mask` (`composite.py:102-113`):

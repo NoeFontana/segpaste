@@ -106,7 +106,7 @@ class CocoDetectionV2(VisionDataset):
                 ),  # pyright: ignore[reportCallIssue]
                 "labels": torch.zeros(0, dtype=torch.long),
                 "masks": tv_tensors.Mask(
-                    torch.zeros((0, *canvas_size), dtype=torch.uint8)
+                    torch.zeros((0, *canvas_size), dtype=torch.bool)
                 ),
             }
         else:
@@ -142,7 +142,7 @@ class CocoDetectionV2(VisionDataset):
                     )
                     masks.append(mask)
 
-                masks_tensor = tv_tensors.Mask(torch.stack(masks))
+                masks_tensor = tv_tensors.Mask(torch.stack(masks).to(torch.bool))
                 target["masks"] = masks_tensor
 
         if "padding_mask" in self.target_keys:

@@ -29,8 +29,25 @@ from torch.nn.functional import grid_sample
 from torchvision import tv_tensors
 
 from segpaste._internal.gpu.batched_placement import BatchedPlacement
-from segpaste.types import PaddedBatchedDenseSample
+from segpaste.types import PaddedBatchedDenseSample, PaddingMask
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
+
+
+def _warp_validity_gate(src_gate: Tensor, grid: Tensor) -> Tensor:
+    """Warp a bool validity gate (``True`` = valid) via nearest-neighbor sampling.
+
+    Pixels mapped from outside the source frame come back as 0 under
+    ``padding_mode="zeros"`` — i.e. invalid in the output, which matches
+    the desired semantics for both ``depth_valid`` and ``image_valid``.
+    """
+    sampled = grid_sample(
+        src_gate.to(torch.float32),
+        grid,
+        mode="nearest",
+        padding_mode="zeros",
+        align_corners=False,
+    )
+    return sampled > 0.5
 
 
 def _build_grid(
@@ -190,15 +207,9 @@ class AffinePropagator(nn.Module):
                 padding_mode="zeros",
                 align_corners=False,
             )
-            dv = padded.depth_valid[placement.source_idx].float()
-            sampled_dv = grid_sample(
-                dv,
-                grid,
-                mode="nearest",
-                padding_mode="zeros",
-                align_corners=False,
+            warped_depth_valid = _warp_validity_gate(
+                padded.depth_valid[placement.source_idx], grid
             )
-            warped_depth_valid = sampled_dv > 0.5
 
         warped_normals: Tensor | None = None
         if padded.normals is not None:
@@ -221,6 +232,12 @@ class AffinePropagator(nn.Module):
             else None
         )
 
+        warped_padding_mask: PaddingMask | None = None
+        if padded.padding_mask is not None:
+            src_iv = ~padded.padding_mask[placement.source_idx].as_subclass(Tensor)
+            warped_iv = _warp_validity_gate(src_iv, grid)
+            warped_padding_mask = PaddingMask.from_tensor(~warped_iv)
+
         return PaddedBatchedDenseSample(
             images=tv_tensors.Image(warped_images),
             boxes=warped_boxes,
@@ -234,6 +251,6 @@ class AffinePropagator(nn.Module):
             depth=warped_depth,
             depth_valid=warped_depth_valid,
             normals=warped_normals,
-            padding_mask=padded.padding_mask,
+            padding_mask=warped_padding_mask,
             camera_intrinsics=warped_intrinsics,
         )

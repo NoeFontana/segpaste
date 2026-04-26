@@ -113,14 +113,18 @@ class DenseComposite(nn.Module):
         self, target: DenseSample, source: DenseSample, paste_mask: Tensor
     ) -> Tensor:
         if target.depth is None or source.depth is None:
-            return paste_mask
-        # depth/depth_valid co-optional invariant is enforced by DenseSample.
-        tgt_valid = target.depth_valid
-        if tgt_valid is None:  # pragma: no cover - guarded by DenseSample
-            raise ValueError("target.depth_valid missing alongside target.depth")
-        closer = (source.depth < target.depth).squeeze(0)
-        invalid = (~tgt_valid).squeeze(0)
-        return paste_mask & (closer | invalid)
+            m_eff = paste_mask
+        else:
+            # depth/depth_valid co-optional invariant is enforced by DenseSample.
+            tgt_valid = target.depth_valid
+            if tgt_valid is None:  # pragma: no cover - guarded by DenseSample
+                raise ValueError("target.depth_valid missing alongside target.depth")
+            closer = (source.depth < target.depth).squeeze(0)
+            invalid = (~tgt_valid).squeeze(0)
+            m_eff = paste_mask & (closer | invalid)
+        if source.padding_mask is not None:
+            m_eff = m_eff & ~source.padding_mask.as_subclass(Tensor).squeeze(0)
+        return m_eff
 
     def _composite_image(
         self, target: DenseSample, source: DenseSample, m_eff: Tensor
