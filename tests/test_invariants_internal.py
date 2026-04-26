@@ -40,14 +40,19 @@ from segpaste._internal.invariants.semantic import (
     check_semantic_ignore_preserved,
     check_semantic_single_class_per_pixel,
 )
-from segpaste.types import CameraIntrinsics, Modality, PanopticSchema
-from tests.shared import FakePanopticSchema, make_disjoint_panoptic_sample
+from segpaste.types import (
+    CameraIntrinsics,
+    Modality,
+    PanopticSchema,
+    PanopticSchemaSpec,
+)
+from tests.shared import make_disjoint_panoptic_sample
 from tests.strategies.dense_sample import dense_sample_strategy
 
 
 def _fuzz_schema() -> PanopticSchema:
     """Schema matching `tests.strategies.dense_sample` panoptic conventions."""
-    return FakePanopticSchema(
+    return PanopticSchemaSpec(
         classes={i: ("stuff" if i == 0 else "thing") for i in range(8)},
         ignore_index=255,
         max_instances_per_image=256,

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 import torch
+from pydantic import BaseModel, ConfigDict
 from torchvision import tv_tensors
 from torchvision.tv_tensors import Mask
 
@@ -69,6 +70,22 @@ class PanopticSchema(Protocol):
     classes: Mapping[int, Literal["thing", "stuff"]]
     ignore_index: int
     max_instances_per_image: int
+
+
+class PanopticSchemaSpec(BaseModel):
+    """JSON-serializable :class:`PanopticSchema` carrier for preset configs.
+
+    The :class:`PanopticSchema` Protocol cannot travel inside a frozen
+    Pydantic config (it's a structural type with no concrete constructor).
+    This Pydantic model carries the same fields and structurally satisfies
+    the Protocol at runtime.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    classes: Mapping[int, Literal["thing", "stuff"]]
+    ignore_index: int = 255
+    max_instances_per_image: int = 256
 
 
 @dataclass(frozen=True, slots=True)
