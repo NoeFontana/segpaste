@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import torch
 from hypothesis import given, settings
@@ -13,6 +15,7 @@ from segpaste.types import (
     DenseSample,
     InstanceMask,
     Modality,
+    PaddingMask,
     PanopticMap,
     SemanticMap,
 )
@@ -215,6 +218,49 @@ class TestEffectiveMask:
         m_eff = composite._effective_mask(tgt, src, paste)  # pyright: ignore[reportPrivateUsage]
 
         assert m_eff.all(), "invalid target depth → paste wins regardless"
+
+    def test_source_padding_mask_excludes_pad_pixels(self) -> None:
+        """Source-pad pixels (zeros from LSJ) must not leak into the composite."""
+        h = w = 16
+        tgt = _mk_instance_sample(h, w, [(2, 2, 6, 6)], seed=0)
+        src = _mk_instance_sample(h, w, [(0, 0, 12, 12)], seed=1)
+        src_pad = torch.zeros(1, h, w, dtype=torch.bool)
+        src_pad[0, 8:, 8:] = True
+        src_with_pad = replace(src, padding_mask=PaddingMask(src_pad))
+        paste = torch.zeros(h, w, dtype=torch.bool)
+        paste[4:14, 4:14] = True
+
+        composite = DenseComposite(_cfg())
+        m_eff = composite._effective_mask(tgt, src_with_pad, paste)  # pyright: ignore[reportPrivateUsage]
+
+        assert not bool((m_eff & src_pad.squeeze(0)).any())
+        # Non-pad paste pixels still active.
+        assert bool((m_eff & paste & ~src_pad.squeeze(0)).any())
+
+    def test_source_padding_mask_keeps_target_inside_pad_overlap(self) -> None:
+        """End-to-end: composed image equals target where source-pad overlaps paste."""
+        h = w = 16
+        tgt = _mk_instance_sample(h, w, [(2, 2, 6, 6)], seed=0)
+        src = _mk_instance_sample(h, w, [(0, 0, 12, 12)], seed=1)
+        src_pad = torch.zeros(1, h, w, dtype=torch.bool)
+        src_pad[0, 8:, 8:] = True
+        src_with_pad = replace(src, padding_mask=PaddingMask(src_pad))
+        paste = torch.zeros(h, w, dtype=torch.bool)
+        paste[4:14, 4:14] = True
+
+        out = DenseComposite(_cfg())(tgt, src_with_pad, paste)
+
+        out_t = out.image.as_subclass(torch.Tensor)
+        tgt_t = tgt.image.as_subclass(torch.Tensor)
+        src_t = src.image.as_subclass(torch.Tensor)
+        pad_overlap = paste & src_pad.squeeze(0)
+        nonpad_paste = paste & ~src_pad.squeeze(0)
+        assert torch.equal(
+            out_t[:, pad_overlap].flatten(), tgt_t[:, pad_overlap].flatten()
+        )
+        assert torch.equal(
+            out_t[:, nonpad_paste].flatten(), src_t[:, nonpad_paste].flatten()
+        )
 
 
 class TestSemanticComposite:

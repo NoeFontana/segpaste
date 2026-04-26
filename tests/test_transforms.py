@@ -473,6 +473,28 @@ class TestFixedSizeCrop:
         assert torch.all(result[128:, :] == 255)  # Bottom padding
         assert torch.all(result[:, 128:] == 255)  # Right padding
 
+    def test_transform_pads_bool_mask_with_false(self) -> None:
+        """Bool-typed Mask subclasses pad with False, not seg_pad_value=255.
+
+        seg_pad_value=255 → True under bool coercion polluted per-instance
+        InstanceMask areas with the entire pad band; FixedSizeCrop now
+        special-cases bool dtype to write False.
+        """
+        transform = FixedSizeCrop(
+            output_height=64,
+            output_width=64,
+            seg_pad_value=255,
+        )
+
+        bool_mask = tv_tensors.Mask(torch.ones(2, 32, 32, dtype=torch.bool))
+        params = {"offset_top": 0, "offset_left": 0}
+        result = transform.transform(bool_mask, params)
+
+        assert result.dtype == torch.bool
+        assert bool(result[:, :32, :32].all())  # original content preserved
+        assert not bool(result[:, 32:, :].any())  # bottom pad False
+        assert not bool(result[:, :, 32:].any())  # right pad False
+
     def test_transform_with_video(self) -> None:
         """Test transform with video tensor type."""
         transform = FixedSizeCrop(

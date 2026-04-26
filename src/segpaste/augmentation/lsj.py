@@ -59,19 +59,27 @@ class FixedSizeCrop(Transform):
             height=self.output_height,
             width=self.output_width,
         )
-        # If the input is smaller than the output size, we pad it
-        if h < self.output_height:
-            if isinstance(cropped, tv_tensors.Image | tv_tensors.Video):
-                cropped[..., h:, :] = self.img_pad_value
-            elif isinstance(cropped, tv_tensors.Mask):
-                cropped[..., h:, :] = self.seg_pad_value
-        if w < self.output_width:
-            if isinstance(cropped, tv_tensors.Image | tv_tensors.Video):
-                cropped[..., :, w:] = self.img_pad_value
-            elif isinstance(cropped, tv_tensors.Mask):
-                cropped[..., :, w:] = self.seg_pad_value
+        pad_value = self._pad_value_for(cropped)
+        if pad_value is not None:
+            if h < self.output_height:
+                cropped[..., h:, :] = pad_value
+            if w < self.output_width:
+                cropped[..., :, w:] = pad_value
 
         return cropped
+
+    def _pad_value_for(
+        self, cropped: tv_tensors.TVTensor | torch.Tensor
+    ) -> bool | int | float | None:
+        if isinstance(cropped, tv_tensors.Image | tv_tensors.Video):
+            return self.img_pad_value
+        if isinstance(cropped, PaddingMask):
+            return self.seg_pad_value
+        if isinstance(cropped, tv_tensors.Mask):
+            # Bool per-instance masks must pad False; 255 coerces to True and
+            # would absorb the whole pad band into every instance.
+            return False if cropped.dtype == torch.bool else self.seg_pad_value
+        return None
 
 
 class RandomResize(Transform):

@@ -42,15 +42,20 @@ def _effective_mask(
     target_depth: Tensor | None,
     target_depth_valid: Tensor | None,
     source_depth: Tensor | None,
+    source_image_valid: Tensor | None,
 ) -> Tensor:
-    """Z-test-gated paste mask (ADR-0005 §3)."""
+    """Z-test-gated paste mask (ADR-0005 §3, ADR-0007 §2 generalization)."""
     if target_depth is None or source_depth is None:
-        return paste_mask
-    if target_depth_valid is None:
-        raise ValueError("target depth_valid required when depth is present")
-    closer = (source_depth < target_depth).squeeze(1)
-    invalid = (~target_depth_valid).squeeze(1)
-    return paste_mask & (closer | invalid)
+        m_eff = paste_mask
+    else:
+        if target_depth_valid is None:
+            raise ValueError("target depth_valid required when depth is present")
+        closer = (source_depth < target_depth).squeeze(1)
+        invalid = (~target_depth_valid).squeeze(1)
+        m_eff = paste_mask & (closer | invalid)
+    if source_image_valid is not None:
+        m_eff = m_eff & source_image_valid
+    return m_eff
 
 
 class TileCompositor(nn.Module):
@@ -108,6 +113,12 @@ class TileCompositor(nn.Module):
             target.instance_masks.clone() if target.instance_masks is not None else None
         )
 
+        src_image_valid = (
+            ~source.padding_mask.as_subclass(Tensor).squeeze(1)
+            if source.padding_mask is not None
+            else None
+        )
+
         ts = self.config.tile_size
         for y0 in range(0, h, ts):
             y1 = min(y0 + ts, h)
@@ -129,7 +140,12 @@ class TileCompositor(nn.Module):
                     if source.depth is not None
                     else None
                 )
-                m_eff = _effective_mask(paste_tile, tgt_d, tgt_dv, src_d)
+                siv_tile = (
+                    src_image_valid[:, y0:y1, x0:x1]
+                    if src_image_valid is not None
+                    else None
+                )
+                m_eff = _effective_mask(paste_tile, tgt_d, tgt_dv, src_d, siv_tile)
                 m3 = m_eff.unsqueeze(1)
 
                 out_image[:, :, y0:y1, x0:x1] = torch.where(

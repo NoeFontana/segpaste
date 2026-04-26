@@ -165,3 +165,105 @@ class TestPydanticConfig:
     def test_extra_forbid(self) -> None:
         with pytest.raises(ValidationError):
             BatchedPlacementConfig(bogus_field=1.0)  # pyright: ignore[reportCallIssue]
+
+
+def _small_box_sample(seed: int) -> DenseSample:
+    """Single 6x6 mask anchored at (2, 2) in a 32x32 canvas — fits in [0, 16]^2."""
+    h = w = 32
+    gen = torch.Generator().manual_seed(seed)
+    image = tv_tensors.Image(torch.rand(3, h, w, generator=gen))
+    mask = torch.zeros(1, h, w, dtype=torch.bool)
+    mask[0, 2:8, 2:8] = True
+    return DenseSample(
+        image=image,
+        boxes=tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+            torch.tensor([[2.0, 2.0, 8.0, 8.0]]),
+            format=tv_tensors.BoundingBoxFormat.XYXY,
+            canvas_size=(h, w),
+        ),
+        labels=torch.tensor([1], dtype=torch.int64),
+        instance_ids=torch.tensor([0], dtype=torch.int32),
+        instance_masks=InstanceMask(mask),
+    )
+
+
+def _wide_box_sample(seed: int) -> DenseSample:
+    """Single mask whose box max=20 exceeds the 16-px valid extent."""
+    h = w = 32
+    gen = torch.Generator().manual_seed(seed)
+    image = tv_tensors.Image(torch.rand(3, h, w, generator=gen))
+    mask = torch.zeros(1, h, w, dtype=torch.bool)
+    mask[0, 0:20, 0:20] = True
+    return DenseSample(
+        image=image,
+        boxes=tv_tensors.BoundingBoxes(  # pyright: ignore[reportCallIssue]
+            torch.tensor([[0.0, 0.0, 20.0, 20.0]]),
+            format=tv_tensors.BoundingBoxFormat.XYXY,
+            canvas_size=(h, w),
+        ),
+        labels=torch.tensor([1], dtype=torch.int64),
+        instance_ids=torch.tensor([0], dtype=torch.int32),
+        instance_masks=InstanceMask(mask),
+    )
+
+
+class TestValidExtent:
+    def test_translate_respects_valid_extent(self) -> None:
+        padded = _padded(b=4, h=32, w=32, k=5)
+        sampler = _sampler(scale_range=(0.5, 1.0))
+        ve = torch.full((4, 2), 16.0)
+        out = sampler(padded, torch.Generator().manual_seed(0), valid_extent=ve)
+
+        source_boxes = padded.boxes[out.source_idx]
+        box_wh = source_boxes[..., 2:] - source_boxes[..., :2]
+        scaled_wh = box_wh * out.scale.view(-1, 1, 1)
+        max_slot_h = scaled_wh[..., 1].amax(dim=-1)
+        max_slot_w = scaled_wh[..., 0].amax(dim=-1)
+        has_any = out.paste_valid.any(dim=-1)
+        eps = 1e-4
+
+        if has_any.any():
+            assert bool((out.translate[..., 0][has_any] >= 0.0).all())
+            assert bool((out.translate[..., 1][has_any] >= 0.0).all())
+            assert bool(
+                (
+                    out.translate[..., 0][has_any] + max_slot_h[has_any] <= 16.0 + eps
+                ).all()
+            )
+            assert bool(
+                (
+                    out.translate[..., 1][has_any] + max_slot_w[has_any] <= 16.0 + eps
+                ).all()
+            )
+
+    def test_source_bbox_outside_valid_extent_clears_paste_valid(self) -> None:
+        """A source instance whose bbox extends past valid_extent must not paste."""
+        # B=2 → diagonal mask forces source_idx[1] = 0, source_idx[0] = 1.
+        # hflip=0 isolates the source-side gate from the target-side fits gate
+        # (which rejects flipped placements when (w-1)-bx1 exceeds valid_extent).
+        samples = [_wide_box_sample(seed=0), _small_box_sample(seed=1)]
+        padded = BatchedDenseSample.from_samples(samples).to_padded(max_instances=1)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(scale_range=(1.0, 1.0), hflip_probability=0.0)
+        )
+        ve = torch.tensor([[16.0, 16.0], [16.0, 16.0]])
+        out = sampler(padded, torch.Generator().manual_seed(0), valid_extent=ve)
+
+        # Target 1 sources from sample 0 (bbox max 20 > 16) — paste_valid cleared.
+        assert int(out.source_idx[1].item()) == 0
+        assert not bool(out.paste_valid[1, 0].item())
+        # Target 0 sources from sample 1 (bbox max 8 ≤ 16) — paste_valid preserved.
+        assert int(out.source_idx[0].item()) == 1
+        assert bool(out.paste_valid[0, 0].item())
+
+    def test_none_recovers_full_canvas_behavior(self) -> None:
+        """``valid_extent=None`` must be bitwise-identical to the prior signature."""
+        padded = _padded(b=4, h=32, w=32, k=5)
+        sampler = _sampler(scale_range=(0.5, 1.5))
+        a = sampler(padded, torch.Generator().manual_seed(7), valid_extent=None)
+        b = sampler(padded, torch.Generator().manual_seed(7))
+        assert torch.equal(a.source_idx, b.source_idx)
+        assert torch.equal(a.translate, b.translate)
+        assert torch.equal(a.scale, b.scale)
+        assert torch.equal(a.hflip, b.hflip)
+        assert torch.equal(a.paste_valid, b.paste_valid)

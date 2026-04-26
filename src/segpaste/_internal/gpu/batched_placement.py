@@ -80,7 +80,16 @@ class BatchedPlacementSampler(nn.Module):
         self,
         padded: PaddedBatchedDenseSample,
         generator: torch.Generator | None = None,
+        valid_extent: Tensor | None = None,
     ) -> BatchedPlacement:
+        """Draw one affine per target.
+
+        ``valid_extent`` is an optional ``[B, 2]`` ``(h_v, w_v)`` float tensor
+        bounding the valid (non-pad) image extent for each sample. When set,
+        translates are sampled inside ``[0, h_v) x [0, w_v)`` and pastes whose
+        source bbox extends past the source's valid extent are dropped via
+        ``paste_valid``. ``None`` recovers the full-canvas behavior.
+        """
         b = padded.batch_size
         k = padded.max_instances
         device = padded.images.device
@@ -104,6 +113,13 @@ class BatchedPlacementSampler(nn.Module):
                 paste_valid=torch.zeros((1, k), dtype=torch.bool, device=device),
             )
 
+        if valid_extent is None:
+            ve = padded.images.new_tensor([float(h), float(w)]).expand(b, 2)
+        else:
+            ve = valid_extent.to(device=device, dtype=torch.float32)
+        tgt_h = ve[:, 0]
+        tgt_w = ve[:, 1]
+
         weights = 1.0 - torch.eye(b, device=device)
         source_idx = torch.multinomial(
             weights, num_samples=1, generator=generator
@@ -117,18 +133,6 @@ class BatchedPlacementSampler(nn.Module):
             torch.rand((b,), generator=generator, device=device) * (smax - smin) + smin
         )
 
-        box_wh = source_boxes[..., 2:] - source_boxes[..., :2]
-        scaled_w_per_slot = box_wh[..., 0] * scale.unsqueeze(-1)
-        scaled_h_per_slot = box_wh[..., 1] * scale.unsqueeze(-1)
-
-        max_scaled_h = scaled_h_per_slot.amax(dim=-1)
-        max_scaled_w = scaled_w_per_slot.amax(dim=-1)
-        max_ty = torch.clamp(float(h) - max_scaled_h, min=0.0)
-        max_tx = torch.clamp(float(w) - max_scaled_w, min=0.0)
-        ty = torch.rand((b,), generator=generator, device=device) * max_ty
-        tx = torch.rand((b,), generator=generator, device=device) * max_tx
-        translate = torch.stack([ty, tx], dim=-1)
-
         hflip = torch.bernoulli(
             torch.full(
                 (b,),
@@ -139,8 +143,41 @@ class BatchedPlacementSampler(nn.Module):
             generator=generator,
         ).bool()
 
-        fits = (scaled_h_per_slot <= float(h)) & (scaled_w_per_slot <= float(w))
-        paste_valid = source_valid & fits
+        # Per-slot effective right/bottom edges in the source coord frame.
+        # Affine maps source (sy, sx) → output (sy*s + ty, sx*s + tx); with hflip
+        # x is reflected about (w-1)/2 first, so the box's effective right edge
+        # in output coords is ((w-1) - bx1)*s + tx (vs. bx2*s + tx with no flip).
+        flip = hflip.unsqueeze(-1)
+        eff_x2 = torch.where(
+            flip, (w - 1.0) - source_boxes[..., 0], source_boxes[..., 2]
+        )
+        eff_y2 = source_boxes[..., 3]
+        # Padded slots (boxes [0,0,0,0]) pick up eff_x2 = w-1 under hflip — large
+        # and bogus. Zero them out so they don't over-restrict the per-target
+        # translate bound; source_valid still gates them in `paste_valid`.
+        zero = torch.zeros_like(eff_x2)
+        eff_x2_for_bound = torch.where(source_valid, eff_x2, zero)
+        eff_y2_for_bound = torch.where(source_valid, eff_y2, zero)
+
+        scaled_eff_x2 = eff_x2 * scale.unsqueeze(-1)
+        scaled_eff_y2 = eff_y2 * scale.unsqueeze(-1)
+        max_scaled_x2 = (eff_x2_for_bound * scale.unsqueeze(-1)).amax(dim=-1)
+        max_scaled_y2 = (eff_y2_for_bound * scale.unsqueeze(-1)).amax(dim=-1)
+
+        max_ty = torch.clamp(tgt_h - max_scaled_y2, min=0.0)
+        max_tx = torch.clamp(tgt_w - max_scaled_x2, min=0.0)
+        ty = torch.rand((b,), generator=generator, device=device) * max_ty
+        tx = torch.rand((b,), generator=generator, device=device) * max_tx
+        translate = torch.stack([ty, tx], dim=-1)
+
+        fits = (scaled_eff_y2 + ty.unsqueeze(-1) <= tgt_h.unsqueeze(-1)) & (
+            scaled_eff_x2 + tx.unsqueeze(-1) <= tgt_w.unsqueeze(-1)
+        )
+        source_ve = ve[source_idx]
+        box_in_valid = (source_boxes[..., 3] <= source_ve[:, 0:1]) & (
+            source_boxes[..., 2] <= source_ve[:, 1:2]
+        )
+        paste_valid = source_valid & fits & box_in_valid
 
         return BatchedPlacement(
             source_idx=source_idx,
