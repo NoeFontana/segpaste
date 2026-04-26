@@ -129,6 +129,8 @@ class SanitizeInstances(Transform):
             )
             return F.convert_bounding_box_format(new_boxes, new_format=inpt.format)
         if isinstance(inpt, tv_tensors.Mask):
+            if inpt.ndim < 3:
+                return inpt
             return tv_tensors.wrap(inpt[valid], like=inpt)
         if labels is not None and any(inpt is x for x in labels):
             return inpt[valid]

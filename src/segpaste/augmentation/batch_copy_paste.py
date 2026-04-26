@@ -36,6 +36,7 @@ from dataclasses import replace
 import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
+from torchvision import tv_tensors
 
 from segpaste._internal.gpu.affine_propagate import AffinePropagator
 from segpaste._internal.gpu.batched_placement import (
@@ -44,7 +45,28 @@ from segpaste._internal.gpu.batched_placement import (
     BatchedPlacementSampler,
 )
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
-from segpaste.types import PaddedBatchedDenseSample
+from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
+from segpaste.types.dense_sample import PanopticMap, SemanticMap
+
+
+class PanopticPasteConfig(BaseModel):
+    """Panoptic-specific augmentation knobs (ADR-0006).
+
+    Activates the thing-only paste source filter (ADR-0006 §2) and the
+    stuff-area-threshold post-composite revert. Set on
+    :attr:`BatchCopyPasteConfig.panoptic` to engage the panoptic path.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    taxonomy: PanopticSchemaSpec
+    """Stuff/thing taxonomy. Required when panoptic mode is active."""
+
+    tau_stuff_frac: float = Field(default=0.1, ge=0.0, le=1.0)
+    """Per-stuff-class minimum *remaining-area fraction* after paste. A
+    paste that drives any stuff class below this fraction of its
+    pre-paste area is reverted on the affected pixels. ``0.1`` matches
+    :attr:`BatchCopyPasteConfig.min_residual_area_frac` ergonomics."""
 
 
 class BatchCopyPasteConfig(BaseModel):
@@ -65,6 +87,11 @@ class BatchCopyPasteConfig(BaseModel):
     of dropping ≥90%-occluded annotations. Mirrors the inverse of
     :attr:`segpaste._internal.composite.CompositeConfig.occluded_area_threshold`
     (``min_residual = 1 - occluded_threshold``)."""
+
+    panoptic: PanopticPasteConfig | None = None
+    """When set, gates source rows to thing-only and applies the
+    stuff-area-threshold post-composite revert (ADR-0006). ``None``
+    leaves the augmentation panoptic-agnostic (default)."""
 
 
 def drop_occluded_targets(
@@ -94,6 +121,8 @@ class BatchCopyPaste(nn.Module):
     """Graph-compilable batched copy-paste augmentation."""
 
     config: BatchCopyPasteConfig
+    thing_classes: Tensor
+    stuff_classes: Tensor
 
     def __init__(self, config: BatchCopyPasteConfig | None = None) -> None:
         super().__init__()
@@ -101,6 +130,26 @@ class BatchCopyPaste(nn.Module):
         self.placement_sampler = BatchedPlacementSampler(self.config.placement)
         self.propagator = AffinePropagator()
         self.compositor = TileCompositor(self.config.composite)
+
+        if self.config.panoptic is not None:
+            taxonomy = self.config.panoptic.taxonomy
+            things = sorted(
+                cls for cls, kind in taxonomy.classes.items() if kind == "thing"
+            )
+            stuffs = sorted(
+                cls for cls, kind in taxonomy.classes.items() if kind == "stuff"
+            )
+            self.register_buffer(
+                "thing_classes", torch.tensor(things, dtype=torch.int64)
+            )
+            self.register_buffer(
+                "stuff_classes", torch.tensor(stuffs, dtype=torch.int64)
+            )
+            self._class_table_size = max([*things, *stuffs, taxonomy.ignore_index]) + 1
+        else:
+            self.register_buffer("thing_classes", torch.empty((0,), dtype=torch.int64))
+            self.register_buffer("stuff_classes", torch.empty((0,), dtype=torch.int64))
+            self._class_table_size = 0
 
     def forward(
         self,
@@ -111,14 +160,114 @@ class BatchCopyPaste(nn.Module):
             return padded
 
         valid_extent = self._valid_extent(padded)
-        placement = self.placement_sampler(padded, generator, valid_extent=valid_extent)
+        source_eligible = self._source_eligible(padded)
+        placement = self.placement_sampler(
+            padded,
+            generator,
+            valid_extent=valid_extent,
+            source_eligible=source_eligible,
+        )
         warped = self.propagator(padded, placement)
         paste_mask = self._paste_mask(warped, placement)
         composited = self.compositor(padded, warped, paste_mask)
+        if self.config.panoptic is not None:
+            composited, warped = self._revert_stuff_collapse(
+                padded, composited, warped, paste_mask
+            )
         composited = drop_occluded_targets(
             padded, composited, self.config.min_residual_area_frac
         )
         return self._merge_slots(composited, warped, placement)
+
+    def _source_eligible(self, padded: PaddedBatchedDenseSample) -> Tensor | None:
+        if self.config.panoptic is None:
+            return None
+        return torch.isin(padded.labels, self.thing_classes, assume_unique=True)
+
+    def _revert_stuff_collapse(
+        self,
+        padded: PaddedBatchedDenseSample,
+        composited: PaddedBatchedDenseSample,
+        warped: PaddedBatchedDenseSample,
+        paste_mask: Tensor,
+    ) -> tuple[PaddedBatchedDenseSample, PaddedBatchedDenseSample]:
+        """Revert paste pixels where a pre-paste stuff class collapsed (ADR-0006 §3).
+
+        Image, semantic, and panoptic modalities are reverted to ``padded`` on
+        pixels that (a) carried a stuff class pre-paste whose post-paste area
+        fell below ``tau_stuff_frac`` of its pre-paste area, and (b) were
+        overwritten by paste. Target instance survivors are restored and
+        warped paste masks cleared so the panoptic bijection on thing pixels
+        still holds downstream.
+        """
+        panoptic = self.config.panoptic
+        if (
+            panoptic is None
+            or padded.semantic_maps is None
+            or composited.semantic_maps is None
+            or self.stuff_classes.numel() == 0
+        ):
+            return composited, warped
+
+        b, h, w = paste_mask.shape
+        device = paste_mask.device
+        n = self._class_table_size
+        tau = panoptic.tau_stuff_frac
+
+        pre = padded.semantic_maps.as_subclass(Tensor).flatten(1)
+        post = composited.semantic_maps.as_subclass(Tensor).flatten(1)
+        ones = torch.ones((), dtype=torch.int64, device=device).expand_as(pre)
+        before_hist = torch.zeros((b, n), dtype=torch.int64, device=device)
+        after_hist = torch.zeros((b, n), dtype=torch.int64, device=device)
+        before_hist.scatter_add_(1, pre, ones)
+        after_hist.scatter_add_(1, post, ones)
+
+        before = before_hist.index_select(1, self.stuff_classes).to(torch.float32)
+        after = after_hist.index_select(1, self.stuff_classes).to(torch.float32)
+        collapse = (before > 0) & (after < tau * before)
+
+        collapse_table = torch.zeros((b, n), dtype=torch.bool, device=device)
+        collapse_table.scatter_(
+            1, self.stuff_classes.unsqueeze(0).expand(b, -1), collapse
+        )
+        revert = collapse_table.gather(1, pre).view(b, h, w) & paste_mask
+
+        rev3 = revert.unsqueeze(1)
+        new_image = torch.where(rev3, padded.images, composited.images)
+        new_sem = torch.where(
+            revert,
+            padded.semantic_maps.as_subclass(Tensor),
+            composited.semantic_maps.as_subclass(Tensor),
+        )
+        if padded.panoptic_maps is not None and composited.panoptic_maps is not None:
+            new_pano: Tensor | None = torch.where(
+                revert,
+                padded.panoptic_maps.as_subclass(Tensor),
+                composited.panoptic_maps.as_subclass(Tensor),
+            )
+        else:
+            new_pano = None
+
+        if composited.instance_masks is not None and padded.instance_masks is not None:
+            new_target_masks: Tensor | None = composited.instance_masks | (
+                padded.instance_masks & rev3
+            )
+        else:
+            new_target_masks = composited.instance_masks
+
+        new_warped_masks = (
+            warped.instance_masks & ~rev3 if warped.instance_masks is not None else None
+        )
+
+        new_composited = replace(
+            composited,
+            images=tv_tensors.Image(new_image),
+            semantic_maps=SemanticMap(new_sem),
+            panoptic_maps=PanopticMap(new_pano) if new_pano is not None else None,
+            instance_masks=new_target_masks,
+        )
+        new_warped = replace(warped, instance_masks=new_warped_masks)
+        return new_composited, new_warped
 
     @staticmethod
     def _valid_extent(padded: PaddedBatchedDenseSample) -> Tensor | None:
