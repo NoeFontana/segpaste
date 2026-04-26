@@ -65,20 +65,23 @@ def _to_detections(sample: DenseSample) -> fo.Detections:
     return fo.Detections(detections=detections)
 
 
-def _to_thing_segmentation(sample: DenseSample) -> fo.Segmentation | None:
-    """Encode thing-instance ids as an ``fo.Segmentation`` mask.
+def _to_stuff_segmentation(sample: DenseSample) -> fo.Segmentation | None:
+    """Encode stuff regions as an ``fo.Segmentation`` keyed by category id.
 
-    Returns the ``panoptic_map`` directly: stuff pixels are ``0`` (rendered
-    as transparent background by FO) and each thing instance carries a
-    unique non-zero id. Stuff is intentionally dropped from the overlay —
-    panoptic-dense stuff coverage washes out the underlying image; the
-    interesting per-instance edits live in the thing channel.
+    Things and stuff route to different FO primitives so the two layers
+    cover disjoint pixels: things are countable and go through
+    ``Detections`` (per-instance bbox + mask), stuff is uncountable and
+    is best read as a per-pixel category fill. We zero thing pixels here
+    so the Segmentation overlay does not double-paint regions already
+    rendered by ``detections``.
     """
-    if sample.panoptic_map is None:
+    if sample.panoptic_map is None or sample.semantic_map is None:
         return None
     fo = require_fiftyone()
-    pan = sample.panoptic_map.as_subclass(torch.Tensor).cpu().numpy()
-    return fo.Segmentation(mask=pan.astype("uint16"))
+    pan = sample.panoptic_map.as_subclass(torch.Tensor)
+    sem = sample.semantic_map.as_subclass(torch.Tensor)
+    stuff_only = torch.where(pan == 0, sem, torch.zeros_like(sem))
+    return fo.Segmentation(mask=stuff_only.cpu().numpy().astype("uint16"))
 
 
 def build_dataset(
@@ -118,12 +121,12 @@ def build_dataset(
             "original_detections": _to_detections(outcome.before),
         }
 
-        thing_seg = _to_thing_segmentation(outcome.after)
-        if thing_seg is not None:
-            kwargs["thing_segmentation"] = thing_seg
-            original_thing_seg = _to_thing_segmentation(outcome.before)
-            if original_thing_seg is not None:
-                kwargs["original_thing_segmentation"] = original_thing_seg
+        stuff_seg = _to_stuff_segmentation(outcome.after)
+        if stuff_seg is not None:
+            kwargs["stuff_segmentation"] = stuff_seg
+            original_stuff_seg = _to_stuff_segmentation(outcome.before)
+            if original_stuff_seg is not None:
+                kwargs["original_stuff_segmentation"] = original_stuff_seg
 
         stats = compute_paste_stats(outcome.before, outcome.after)
         if stats is not None:
