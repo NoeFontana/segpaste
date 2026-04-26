@@ -38,6 +38,16 @@ class BatchedPlacementConfig(BaseModel):
     hflip_probability: float = Field(default=0.5, ge=0.0, le=1.0)
     """Per-target probability of horizontal flip."""
 
+    paste_prob: float = Field(default=1.0, ge=0.0, le=1.0)
+    """Per-image Bernoulli gate on whether the augmentation fires. ``1.0``
+    pastes every image (current behavior); ``0.5`` pastes half the batch."""
+
+    k_range: tuple[int, int] = (1, 256)
+    """Per-image paste-count cap. ``K_max`` is drawn uniformly from
+    ``[k_range[0], k_range[1]]`` and any slot whose cumulative rank in
+    ``paste_valid`` exceeds it is dropped. Default ``(1, 256)`` is a no-op
+    for any sane ``max_instances`` (matches the panoptic schema default)."""
+
 
 @dataclass(frozen=True, slots=True)
 class BatchedPlacement:
@@ -81,6 +91,7 @@ class BatchedPlacementSampler(nn.Module):
         padded: PaddedBatchedDenseSample,
         generator: torch.Generator | None = None,
         valid_extent: Tensor | None = None,
+        source_eligible: Tensor | None = None,
     ) -> BatchedPlacement:
         """Draw one affine per target.
 
@@ -89,6 +100,11 @@ class BatchedPlacementSampler(nn.Module):
         translates are sampled inside ``[0, h_v) x [0, w_v)`` and pastes whose
         source bbox extends past the source's valid extent are dropped via
         ``paste_valid``. ``None`` recovers the full-canvas behavior.
+
+        ``source_eligible`` is an optional ``[B, K]`` bool tensor gating which
+        rows are eligible as paste *sources*. Used by the panoptic preset to
+        restrict paste sources to thing-class rows (ADR-0006 §2). ``None``
+        treats every valid row as eligible.
         """
         b = padded.batch_size
         k = padded.max_instances
@@ -127,21 +143,19 @@ class BatchedPlacementSampler(nn.Module):
 
         source_boxes = padded.boxes[source_idx]
         source_valid = padded.instance_valid[source_idx]
+        if source_eligible is not None:
+            source_valid = source_valid & source_eligible[source_idx]
 
         smin, smax = self.config.scale_range
         scale = (
             torch.rand((b,), generator=generator, device=device) * (smax - smin) + smin
         )
 
-        hflip = torch.bernoulli(
-            torch.full(
-                (b,),
-                self.config.hflip_probability,
-                device=device,
-                dtype=torch.float32,
-            ),
-            generator=generator,
-        ).bool()
+        hflip = (
+            torch.empty((b,), device=device, dtype=torch.float32)
+            .bernoulli_(self.config.hflip_probability, generator=generator)
+            .bool()
+        )
 
         # Per-slot effective right/bottom edges in the source coord frame.
         # Affine maps source (sy, sx) → output (sy*s + ty, sx*s + tx); with hflip
@@ -178,6 +192,24 @@ class BatchedPlacementSampler(nn.Module):
             source_boxes[..., 2] <= source_ve[:, 1:2]
         )
         paste_valid = source_valid & fits & box_in_valid
+
+        do_paste = (
+            torch.empty((b,), device=device, dtype=torch.float32)
+            .bernoulli_(self.config.paste_prob, generator=generator)
+            .bool()
+        )
+        paste_valid = paste_valid & do_paste.unsqueeze(-1)
+
+        k_lo, k_hi = self.config.k_range
+        k_max = torch.randint(
+            low=k_lo,
+            high=k_hi + 1,
+            size=(b,),
+            device=device,
+            generator=generator,
+        )
+        rank = paste_valid.long().cumsum(dim=-1) - 1
+        paste_valid = paste_valid & (rank < k_max.unsqueeze(-1))
 
         return BatchedPlacement(
             source_idx=source_idx,
