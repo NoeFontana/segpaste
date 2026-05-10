@@ -45,6 +45,9 @@ dev = [
 ]
 bench = ["numpy>=1.26"]
 bank-memmap = ["numpy>=1.26"]
+bank-lmdb = [
+    "lmdb>=1.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/NoeFontana/segpaste"

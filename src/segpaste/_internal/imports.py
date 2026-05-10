@@ -36,3 +36,14 @@ def require_numpy() -> ModuleType:
             "numpy is not installed. Install with `uv sync --group bank-memmap`."
         ) from exc
     return numpy
+
+
+def require_lmdb() -> ModuleType:
+    """Return the imported ``lmdb`` module or raise with an install hint."""
+    try:
+        import lmdb
+    except ImportError as exc:
+        raise ImportError(
+            "lmdb is not installed. Install with `uv sync --group bank-lmdb`."
+        ) from exc
+    return lmdb
