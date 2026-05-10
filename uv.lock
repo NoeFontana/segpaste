@@ -3003,6 +3003,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+bank-memmap = [
+    { name = "numpy" },
+]
 bench = [
     { name = "numpy" },
 ]
@@ -3038,6 +3041,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+bank-memmap = [{ name = "numpy", specifier = ">=1.26" }]
 bench = [{ name = "numpy", specifier = ">=1.26" }]
 coco = [{ name = "fiftyone", specifier = ">=1.8.0" }]
 dev = [

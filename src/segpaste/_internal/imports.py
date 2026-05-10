@@ -25,3 +25,14 @@ def require_huggingface_hub() -> ModuleType:
             "huggingface_hub is not installed. Install with `uv sync --group eval`."
         ) from exc
     return huggingface_hub
+
+
+def require_numpy() -> ModuleType:
+    """Return the imported ``numpy`` module or raise with an install hint."""
+    try:
+        import numpy
+    except ImportError as exc:
+        raise ImportError(
+            "numpy is not installed. Install with `uv sync --group bank-memmap`."
+        ) from exc
+    return numpy

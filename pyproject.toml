@@ -44,6 +44,7 @@ dev = [
     "hypothesis>=6.150.0",
 ]
 bench = ["numpy>=1.26"]
+bank-memmap = ["numpy>=1.26"]
 
 [project.urls]
 Homepage = "https://github.com/NoeFontana/segpaste"

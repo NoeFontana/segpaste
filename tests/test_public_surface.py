@@ -22,6 +22,7 @@ _EXPECTED_PUBLIC_API: tuple[str, ...] = (
     "CocoDetectionV2",
     "DenseSample",
     "FixedSizeCrop",
+    "InstanceBank",
     "InstanceMask",
     "IntraBatchSource",
     "Modality",

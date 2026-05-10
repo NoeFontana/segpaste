@@ -10,6 +10,7 @@ try:
 except ImportError:
     logging.getLogger(__file__).warning("faster_coco_eval not found.")
 
+from segpaste._internal.bank import InstanceBank
 from segpaste.augmentation import (
     BatchCopyPaste,
     FixedSizeCrop,
@@ -43,6 +44,7 @@ __all__ = [
     "CocoDetectionV2",
     "DenseSample",
     "FixedSizeCrop",
+    "InstanceBank",
     "InstanceMask",
     "IntraBatchSource",
     "Modality",
