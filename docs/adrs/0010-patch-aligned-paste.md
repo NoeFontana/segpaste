@@ -28,8 +28,8 @@ ablation slated for 1.0.0.
 
 ## Decision
 
-Two new fields on
-[`BatchedPlacementConfig`](../../src/segpaste/_internal/gpu/batched_placement.py):
+Two new fields on `BatchedPlacementConfig` at
+`src/segpaste/_internal/gpu/batched_placement.py`:
 
 ```python
 pad_to_multiple: int | None = Field(default=None, gt=0)
@@ -42,7 +42,7 @@ to be divisible by `p`.
 
 ### 1. Canvas padder
 
-[`segpaste._internal.gpu.pad_canvas.pad_canvas_to_multiple`](../../src/segpaste/_internal/gpu/pad_canvas.py)
+`pad_canvas_to_multiple` at `src/segpaste/_internal/gpu/pad_canvas.py`
 right-and-bottom-pads every spatial field of a `PaddedBatchedDenseSample` by
 `(pad_h, pad_w) = (-H % p, -W % p)`:
 
@@ -146,7 +146,7 @@ adds a second case exercising `patch_aligned_paste=True`.
 `BatchedPlacementConfig` and `BatchCopyPasteConfig` are not in
 `segpaste.__all__`; the new fields and the `BatchedPlacement.src_valid_extent`
 field are internal. No
-[`tests/test_public_surface.py`](../../tests/test_public_surface.py) update
+`tests/test_public_surface.py` update
 required.
 
 ### Tests
