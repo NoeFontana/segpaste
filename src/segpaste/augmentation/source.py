@@ -108,9 +108,7 @@ class BankSource(nn.Module):
         """Stage a per-step bank tensor of shape ``[B, K_bank, 5, h, w]``."""
         if bank_batch.ndim != 5 or bank_batch.shape[2] != 5:
             shape = tuple(bank_batch.shape)
-            raise ValueError(
-                f"bank_batch must be [B, K_bank, 5, h, w], got {shape}"
-            )
+            raise ValueError(f"bank_batch must be [B, K_bank, 5, h, w], got {shape}")
         self._bank_batch = bank_batch
 
     def sample(
@@ -132,15 +130,13 @@ class BankSource(nn.Module):
         canvas_h, canvas_w = target.images.shape[-2:]
         device = bank.device
 
-        # 1. Per-target crop selection — single uniform multinomial over K_bank.
-        weights = torch.ones((b, k_bank), device=device, dtype=torch.float32)
-        selected = torch.multinomial(
-            weights, num_samples=1, generator=generator
-        ).squeeze(-1)  # [B]
+        # Uniform draw via randint avoids materializing a [B, K_bank] weight
+        # tensor and the multinomial cumsum kernel. Future weighted-bank
+        # support will substitute multinomial here.
+        selected = torch.randint(0, k_bank, (b,), device=device, generator=generator)
         batch_arange = torch.arange(b, device=device)
         chosen = bank[batch_arange, selected]  # [B, 5, h_crop, w_crop]
 
-        # 2. Build the synthetic [B, ...] source view at target's canvas size.
         target_dtype = target.images.dtype
         img_canvas = torch.zeros(
             (b, 3, canvas_h, canvas_w), dtype=target_dtype, device=device
@@ -166,7 +162,6 @@ class BankSource(nn.Module):
             instance_ids=instance_ids,
         )
 
-        # 3. Per-target affine placement.
         placement = self._sample_placement(
             target,
             source_view,

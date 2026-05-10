@@ -34,7 +34,6 @@ def crops_from_coco(
     *,
     crop_size: tuple[int, int],
     min_area: int = 256,
-    fill_value: int = 0,
 ) -> Iterator[BankCrop]:
     """Yield ``BankCrop`` records from a COCO instance dataset.
 
@@ -87,7 +86,7 @@ def crops_from_coco(
             # Center-pad to (h, w). Crops larger than the target are
             # center-cropped to fit — same dimension for image and mask.
             patch_chw = np.transpose(patch, (2, 0, 1))  # 3, ph, pw
-            image_buf = np.full((3, h, w), fill_value, dtype=np.uint8)
+            image_buf = np.zeros((3, h, w), dtype=np.uint8)
             alpha_buf = np.zeros((1, h, w), dtype=np.bool_)
             ph, pw = patch_chw.shape[1:]
             sh = min(ph, h)

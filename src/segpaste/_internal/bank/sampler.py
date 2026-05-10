@@ -95,11 +95,10 @@ class BankSampler(Sampler[int]):
 
     def __init__(self, bank: InstanceBank, config: BankSamplerConfig) -> None:
         super().__init__()
-        self._bank_len = len(bank)
+        if len(bank) == 0:
+            raise ValueError("BankSampler requires a non-empty bank")
         self.config = config
         self._epoch = 0
-        if self._bank_len == 0:
-            raise ValueError("BankSampler requires a non-empty bank")
         class_weights = repeat_factor_weights(
             bank.class_frequencies, config.repeat_factor_t
         )
@@ -129,8 +128,7 @@ class BankSampler(Sampler[int]):
             indices = torch.multinomial(
                 self._weights, num_samples=take, replacement=True, generator=gen
             )
-            for idx in indices.tolist():
-                yield int(idx)
+            yield from indices.tolist()
             remaining -= take
 
 

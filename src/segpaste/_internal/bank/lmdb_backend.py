@@ -3,85 +3,43 @@
 On-disk layout under ``root/``:
 
 * ``data.mdb``     LMDB B-tree; keys ``b"crop:{idx:08d}"`` map to packed
-                   ``(uint8 [3,h,w] image)(bool [1,h,w] alpha)(int64 class_id)
-                   (optional float16 [256] embedding)`` records.
+                   crop records (see :mod:`segpaste._internal.bank._record`).
 * ``meta.json``    same schema as :mod:`segpaste._internal.bank.memmap`
-                   but with ``format = "lmdb"``.
+                   but with ``format = "lmdb"`` and a ``per_crop_class_ids``
+                   list so :class:`BankSampler` opens in O(1).
 
 Random access is true-random via ``lmdb`` (B-tree, mmap-backed); build
 cost is medium (txn-write per crop). Best for single-host NVMe-scale
-banks (~hundreds of GB) with many concurrent DataLoader workers.
-
-The packed record uses fixed-stride binary so reads are constant-time
-struct unpacks rather than serialized object decode. Image and alpha
-strides come from ``meta.json`` (constant per bank).
+banks with many concurrent DataLoader workers.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import struct
+import contextlib
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import torch
 
+from segpaste._internal.bank._meta import (
+    base_meta,
+    open_meta,
+    stamp_meta,
+)
+from segpaste._internal.bank._record import (
+    decode_crop,
+    pack_record,
+    unpack_record,
+)
 from segpaste._internal.bank.protocol import BankCrop
 from segpaste._internal.imports import require_lmdb, require_numpy
 
 _FORMAT = "lmdb"
-_FORMAT_VERSION = 1
-_EMBED_DIM = 256
-_EMB_BYTES = _EMBED_DIM * 2  # float16
-
-
-def _meta_path(root: Path) -> Path:
-    return root / "meta.json"
-
-
-def _hash_meta(meta: dict[str, Any]) -> str:
-    payload = {k: v for k, v in meta.items() if k != "sha256"}
-    blob = json.dumps(payload, sort_keys=True).encode()
-    return hashlib.sha256(blob).hexdigest()
 
 
 def _key(idx: int) -> bytes:
     return f"crop:{idx:08d}".encode()
-
-
-def _pack_record(
-    image: bytes, alpha: bytes, class_id: int, embedding: bytes | None
-) -> bytes:
-    """Pack one crop record. Layout::
-
-    u8[len_image]  image_bytes
-    u8[len_alpha]  alpha_bytes
-    i64            class_id  (little-endian)
-    u8[0|emb_len]  embedding_bytes (only when bank has embeddings)
-    """
-    parts = [image, alpha, struct.pack("<q", int(class_id))]
-    if embedding is not None:
-        parts.append(embedding)
-    return b"".join(parts)
-
-
-def _unpack_record(
-    blob: bytes, *, image_len: int, alpha_len: int, has_embeddings: bool
-) -> tuple[bytes, bytes, int, bytes | None]:
-    expected = image_len + alpha_len + 8 + (_EMB_BYTES if has_embeddings else 0)
-    if len(blob) != expected:
-        raise ValueError(
-            f"corrupt LMDB record: expected {expected} bytes, got {len(blob)}"
-        )
-    image = blob[:image_len]
-    o = image_len
-    alpha = blob[o : o + alpha_len]
-    o += alpha_len
-    (class_id,) = struct.unpack("<q", blob[o : o + 8])
-    o += 8
-    embedding = blob[o : o + _EMB_BYTES] if has_embeddings else None
-    return image, alpha, int(class_id), embedding
 
 
 class LMDBBank:
@@ -90,28 +48,15 @@ class LMDBBank:
     def __init__(
         self, root: str | Path, *, max_readers: int = 256, readahead: bool = False
     ) -> None:
-        np = require_numpy()
+        require_numpy()
         lmdb = require_lmdb()
-        self._np = np
         self._root = Path(root)
-        with _meta_path(self._root).open("r") as fh:
-            meta = json.load(fh)
-        if meta.get("format") != _FORMAT:
-            raise ValueError(
-                f"{self._root}: meta format {meta.get('format')!r} != {_FORMAT!r}"
-            )
-        if meta.get("format_version") != _FORMAT_VERSION:
-            raise ValueError(
-                f"{self._root}: format_version {meta.get('format_version')} "
-                f"!= {_FORMAT_VERSION}"
-            )
-
-        self._meta = meta
-        self._n: int = int(meta["num_crops"])
-        self._h: int = int(meta["crop_h"])
-        self._w: int = int(meta["crop_w"])
-        self._num_classes: int = int(meta["num_classes"])
-        self._has_embeddings: bool = bool(meta["has_embeddings"])
+        meta = open_meta(self._root, expected_format=_FORMAT)
+        self._n = meta.n
+        self._h = meta.h
+        self._w = meta.w
+        self._has_embeddings = meta.has_embeddings
+        self._sha256 = meta.sha256
         self._image_len = 3 * self._h * self._w
         self._alpha_len = self._h * self._w
 
@@ -124,21 +69,11 @@ class LMDBBank:
             subdir=True,
         )
 
-        recomputed = _hash_meta(meta)
-        stored = meta.get("sha256")
-        if stored is not None and stored != recomputed:
-            self._env.close()
-            raise ValueError(
-                f"{self._root}: meta.json sha256 mismatch (stored {stored!r}, "
-                f"recomputed {recomputed!r})"
-            )
-        self._sha256 = recomputed
-
         self._crop_class_ids = torch.tensor(
-            meta["per_crop_class_ids"], dtype=torch.int64
+            meta.raw["per_crop_class_ids"], dtype=torch.int64
         )
         self._class_frequencies = torch.bincount(
-            self._crop_class_ids, minlength=self._num_classes
+            self._crop_class_ids, minlength=meta.num_classes
         )
 
     def __len__(self) -> int:
@@ -147,29 +82,48 @@ class LMDBBank:
     def __getitem__(self, idx: int) -> BankCrop:
         if idx < 0 or idx >= self._n:
             raise IndexError(idx)
-        with self._env.begin(buffers=False) as txn:
+        env = self._env
+        if env is None:
+            raise RuntimeError("LMDBBank is closed")
+        # ``buffers=True`` returns ``memoryview``s into LMDB-owned pages —
+        # ``decode_crop`` copies into Python-owned tensors before this scope
+        # exits, so releasing the txn after the with-block is safe.
+        with env.begin(buffers=True) as txn:
             blob = txn.get(_key(idx))
-        if blob is None:
-            raise KeyError(f"missing crop key for idx={idx}")
-        image_b, alpha_b, class_id, emb_b = _unpack_record(
-            bytes(blob),
-            image_len=self._image_len,
-            alpha_len=self._alpha_len,
-            has_embeddings=self._has_embeddings,
-        )
-        np = self._np
-        image = torch.from_numpy(
-            np.frombuffer(image_b, dtype=np.uint8).reshape(3, self._h, self._w).copy()
-        )
-        alpha = torch.from_numpy(
-            np.frombuffer(alpha_b, dtype=np.bool_).reshape(1, self._h, self._w).copy()
-        )
-        embedding = None
-        if emb_b is not None:
-            embedding = torch.from_numpy(np.frombuffer(emb_b, dtype=np.float16).copy())
-        return BankCrop(
-            image=image, alpha=alpha, class_id=class_id, embedding=embedding
-        )
+            if blob is None:
+                raise KeyError(f"missing crop key for idx={idx}")
+            image_b, alpha_b, class_id, emb_b = unpack_record(
+                bytes(blob),
+                image_len=self._image_len,
+                alpha_len=self._alpha_len,
+                has_embeddings=self._has_embeddings,
+                backend_format=_FORMAT,
+            )
+        return decode_crop(image_b, alpha_b, class_id, emb_b, h=self._h, w=self._w)
+
+    def close(self) -> None:
+        """Close the LMDB environment. Safe to call multiple times."""
+        env = getattr(self, "_env", None)
+        if env is not None:
+            env.close()
+            self._env = None  # type: ignore[assignment]
+
+    def __enter__(self) -> LMDBBank:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # LMDB env holds an mmap that needs explicit close; suppress all
+        # exceptions because destructors must not raise.
+        with contextlib.suppress(Exception):
+            self.close()
 
     @property
     def class_frequencies(self) -> torch.Tensor:
@@ -206,10 +160,8 @@ def write_lmdb_bank(
 ) -> Path:
     """Write an LMDB bank under ``root``.
 
-    ``images: uint8 [N,3,h,w]``, ``alpha: bool [N,1,h,w]``, ``classes: int64 [N]``,
-    optional ``embeddings: float16 [N,256]``. Per-crop layout follows
-    :func:`_pack_record`. ``map_size_bytes`` is the LMDB map size — the
-    default is sparse and won't physically allocate.
+    See :func:`segpaste._internal.bank.memmap.write_memmap_bank` for input
+    shape conventions.
     """
     np = require_numpy()
     lmdb = require_lmdb()
@@ -222,10 +174,9 @@ def write_lmdb_bank(
     n, _, h, w = images_arr.shape
 
     has_embeddings = embeddings is not None
-    if has_embeddings:
-        emb_arr = np.ascontiguousarray(embeddings, dtype=np.float16)
-    else:
-        emb_arr = None
+    emb_arr = (
+        np.ascontiguousarray(embeddings, dtype=np.float16) if has_embeddings else None
+    )
 
     env = lmdb.open(
         str(root), map_size=map_size_bytes, subdir=True, max_dbs=1, lock=False
@@ -234,7 +185,7 @@ def write_lmdb_bank(
         with env.begin(write=True) as txn:
             for i in range(n):
                 emb_bytes = emb_arr[i].tobytes() if emb_arr is not None else None
-                blob = _pack_record(
+                blob = pack_record(
                     images_arr[i].tobytes(),
                     alpha_arr[i].tobytes(),
                     int(classes_arr[i]),
@@ -244,22 +195,19 @@ def write_lmdb_bank(
     finally:
         env.close()
 
-    freqs = np.bincount(classes_arr, minlength=num_classes).astype(np.int64)
-    meta: dict[str, Any] = {
-        "format": _FORMAT,
-        "format_version": _FORMAT_VERSION,
-        "num_crops": int(n),
-        "crop_h": int(h),
-        "crop_w": int(w),
-        "num_classes": int(num_classes),
-        "has_embeddings": bool(has_embeddings),
-        "segpaste_version": str(segpaste_version),
-        "build_seed": int(build_seed),
-        "class_frequencies": [int(x) for x in freqs.tolist()],
-        # Carrying per-crop class ids in meta avoids an O(N) txn at open time.
-        "per_crop_class_ids": [int(x) for x in classes_arr.tolist()],
-    }
-    meta["sha256"] = _hash_meta(meta)
-    with _meta_path(root).open("w") as fh:
-        json.dump(meta, fh, sort_keys=True, indent=2)
+    freqs = np.bincount(classes_arr, minlength=num_classes).astype(np.int64).tolist()
+    meta = base_meta(
+        backend_format=_FORMAT,
+        n=n,
+        h=h,
+        w=w,
+        num_classes=num_classes,
+        has_embeddings=has_embeddings,
+        build_seed=build_seed,
+        segpaste_version=segpaste_version,
+        class_frequencies=freqs,
+    )
+    # Carrying per-crop class ids in meta avoids an O(N) txn at open time.
+    meta["per_crop_class_ids"] = [int(x) for x in classes_arr.tolist()]
+    stamp_meta(root, meta)
     return root

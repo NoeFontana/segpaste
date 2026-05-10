@@ -6,38 +6,27 @@ On-disk layout under ``root/``:
 * ``alpha.dat``       bool   ``[N, 1, h, w]``
 * ``classes.npy``     int64  ``[N]``
 * ``embeddings.dat``  float16 ``[N, 256]`` (omitted when no embedder)
-* ``meta.json``       ``{format, num_crops, crop_h, crop_w, num_classes,
-                         has_embeddings, segpaste_version, build_seed,
-                         class_frequencies, sha256}``
+* ``meta.json``       see :mod:`segpaste._internal.bank._meta`
 
 Random access is O(1) via mmap so the bank is callable from many DataLoader
 workers without duplicating the page cache. Build cost is highest of the
 three backends because crops are pre-decoded and padded to a fixed
 ``(h, w)``; in exchange the runtime read path has zero decode.
-
-The ``sha256`` field hashes ``meta.json`` minus itself; ``version`` returns
-``"memmap@{sha256[:12]}"`` for cache keys.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import torch
 
+from segpaste._internal.bank._meta import EMBED_DIM, base_meta, open_meta, stamp_meta
 from segpaste._internal.bank.protocol import BankCrop
 from segpaste._internal.imports import require_numpy
 
 _FORMAT = "memmap"
-_FORMAT_VERSION = 1
-_EMBED_DIM = 256
-
-
-def _meta_path(root: Path) -> Path:
-    return root / "meta.json"
 
 
 def _images_path(root: Path) -> Path:
@@ -56,40 +45,18 @@ def _embeddings_path(root: Path) -> Path:
     return root / "embeddings.dat"
 
 
-def _hash_meta(meta: dict[str, Any]) -> str:
-    payload = {k: v for k, v in meta.items() if k != "sha256"}
-    blob = json.dumps(payload, sort_keys=True).encode()
-    return hashlib.sha256(blob).hexdigest()
-
-
 class MemmapBank:
-    """Memory-mapped :class:`InstanceBank` backend.
-
-    Open with :meth:`open` (the canonical entry point) or directly via
-    ``MemmapBank(root)``. The ``mmap_mode`` defaults to read-only ``"r"``
-    so multiple workers share the page cache.
-    """
+    """Memory-mapped :class:`InstanceBank` backend."""
 
     def __init__(self, root: str | Path, *, mmap_mode: str = "r") -> None:
         np = require_numpy()
         self._root = Path(root)
-        with _meta_path(self._root).open("r") as fh:
-            meta = json.load(fh)
-        if meta.get("format") != _FORMAT:
-            raise ValueError(
-                f"{self._root}: meta format {meta.get('format')!r} != {_FORMAT!r}"
-            )
-        if meta.get("format_version") != _FORMAT_VERSION:
-            raise ValueError(
-                f"{self._root}: format_version {meta.get('format_version')} "
-                f"!= {_FORMAT_VERSION}"
-            )
-        self._meta = meta
-        self._n: int = int(meta["num_crops"])
-        self._h: int = int(meta["crop_h"])
-        self._w: int = int(meta["crop_w"])
-        self._num_classes: int = int(meta["num_classes"])
-        self._has_embeddings: bool = bool(meta["has_embeddings"])
+        meta = open_meta(self._root, expected_format=_FORMAT)
+        self._n = meta.n
+        self._h = meta.h
+        self._w = meta.w
+        self._has_embeddings = meta.has_embeddings
+        self._sha256 = meta.sha256
 
         self._images = np.memmap(
             _images_path(self._root),
@@ -109,24 +76,15 @@ class MemmapBank:
                 _embeddings_path(self._root),
                 dtype=np.float16,
                 mode=mmap_mode,
-                shape=(self._n, _EMBED_DIM),
+                shape=(self._n, EMBED_DIM),
             )
         else:
             self._embeddings = None
 
         self._crop_class_ids = torch.from_numpy(self._classes.astype(np.int64).copy())
         self._class_frequencies = torch.bincount(
-            self._crop_class_ids, minlength=self._num_classes
+            self._crop_class_ids, minlength=meta.num_classes
         )
-
-        recomputed = _hash_meta(meta)
-        stored = meta.get("sha256")
-        if stored is not None and stored != recomputed:
-            raise ValueError(
-                f"{self._root}: meta.json sha256 mismatch (stored {stored!r}, "
-                f"recomputed {recomputed!r})"
-            )
-        self._sha256 = recomputed
 
     def __len__(self) -> int:
         return self._n
@@ -134,16 +92,34 @@ class MemmapBank:
     def __getitem__(self, idx: int) -> BankCrop:
         if idx < 0 or idx >= self._n:
             raise IndexError(idx)
+        if self._images is None or self._alpha is None:
+            raise RuntimeError("MemmapBank is closed")
         image = torch.from_numpy(self._images[idx].copy())
         alpha = torch.from_numpy(self._alpha[idx].copy())
         class_id = int(self._classes[idx])
+        embedding = None
         if self._embeddings is not None:
             embedding = torch.from_numpy(self._embeddings[idx].copy())
-        else:
-            embedding = None
         return BankCrop(
             image=image, alpha=alpha, class_id=class_id, embedding=embedding
         )
+
+    def close(self) -> None:
+        """Drop mmap references so the underlying handles can be GC'd."""
+        self._images = None  # type: ignore[assignment]
+        self._alpha = None  # type: ignore[assignment]
+        self._embeddings = None
+
+    def __enter__(self) -> MemmapBank:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     @property
     def class_frequencies(self) -> torch.Tensor:
@@ -181,8 +157,7 @@ def write_memmap_bank(
 
     Parameters are pre-shaped numpy arrays — ``images: uint8 [N,3,h,w]``,
     ``alpha: bool [N,1,h,w]``, ``classes: int64 [N]``, optional
-    ``embeddings: float16 [N,256]``. Used by the build script (PR5) and
-    the test suite. Returns ``root``.
+    ``embeddings: float16 [N,256]``.
     """
     np = require_numpy()
     root = Path(root)
@@ -216,24 +191,21 @@ def write_memmap_bank(
     has_embeddings = embeddings is not None
     if has_embeddings:
         emb_arr = np.ascontiguousarray(embeddings, dtype=np.float16)
-        if emb_arr.shape != (n, _EMBED_DIM):
-            raise ValueError(f"embeddings shape {emb_arr.shape} != ({n}, {_EMBED_DIM})")
+        if emb_arr.shape != (n, EMBED_DIM):
+            raise ValueError(f"embeddings shape {emb_arr.shape} != ({n}, {EMBED_DIM})")
         emb_arr.tofile(_embeddings_path(root))
 
-    freqs = np.bincount(classes_arr, minlength=num_classes).astype(np.int64)
-    meta: dict[str, Any] = {
-        "format": _FORMAT,
-        "format_version": _FORMAT_VERSION,
-        "num_crops": int(n),
-        "crop_h": int(h),
-        "crop_w": int(w),
-        "num_classes": int(num_classes),
-        "has_embeddings": bool(has_embeddings),
-        "segpaste_version": str(segpaste_version),
-        "build_seed": int(build_seed),
-        "class_frequencies": [int(x) for x in freqs.tolist()],
-    }
-    meta["sha256"] = _hash_meta(meta)
-    with _meta_path(root).open("w") as fh:
-        json.dump(meta, fh, sort_keys=True, indent=2)
+    freqs = np.bincount(classes_arr, minlength=num_classes).astype(np.int64).tolist()
+    meta = base_meta(
+        backend_format=_FORMAT,
+        n=n,
+        h=h,
+        w=w,
+        num_classes=num_classes,
+        has_embeddings=has_embeddings,
+        build_seed=build_seed,
+        segpaste_version=segpaste_version,
+        class_frequencies=freqs,
+    )
+    stamp_meta(root, meta)
     return root
