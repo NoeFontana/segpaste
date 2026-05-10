@@ -1,9 +1,18 @@
 """Per-sample affine ``grid_sample`` propagator (ADR-0008 C4).
 
-Given a :class:`PaddedBatchedDenseSample` and a :class:`BatchedPlacement`,
+Given a ``target`` and a ``source`` :class:`PaddedBatchedDenseSample`
+(row-aligned along the batch dim) plus a :class:`BatchedPlacement`,
 produces a new :class:`PaddedBatchedDenseSample` where every target ``i``
-carries the source sample at ``source_idx[i]`` transformed into the target
-frame under the sampled ``(scale, translate, hflip)`` affine.
+carries the source sample at ``source_idx[i]`` transformed into the
+target's canvas frame under the sampled ``(scale, translate, hflip)``
+affine.
+
+The split between target and source is what lets A1 (ADR-0011)
+swap intra-batch sources for an external instance bank without changing
+the propagator itself: ``target`` provides output canvas geometry and
+``source.x[source_idx]`` provides the values to gather. When ``target is
+source`` (the default ``IntraBatchSource`` path), behavior is bitwise
+identical to the pre-A1 single-input form.
 
 Channel-group sampling modes (ADR-0008 §5):
 
@@ -29,8 +38,49 @@ from torch.nn.functional import grid_sample
 from torchvision import tv_tensors
 
 from segpaste._internal.gpu.batched_placement import BatchedPlacement
+from segpaste.compile_util import skip_if_compiling
 from segpaste.types import PaddedBatchedDenseSample, PaddingMask
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
+
+
+@skip_if_compiling
+def _validate_alignment(
+    target: PaddedBatchedDenseSample, source: PaddedBatchedDenseSample
+) -> None:
+    """Assert ``target`` and ``source`` are row-aligned with matching modalities.
+
+    Skipped under ``torch.compile`` (``skip_if_compiling``) so the validation
+    cost stays out of the traced graph. The propagator's tensor ops assume
+    matching ``B``, ``H``, ``W`` and that any optional modality present on
+    ``target`` is also present on ``source`` (so the gather is well-defined).
+    """
+    if target.batch_size != source.batch_size:
+        raise ValueError(
+            f"target.batch_size ({target.batch_size}) != "
+            f"source.batch_size ({source.batch_size})"
+        )
+    if target.images.shape[-2:] != source.images.shape[-2:]:
+        raise ValueError(
+            f"target H,W {tuple(target.images.shape[-2:])} != "
+            f"source H,W {tuple(source.images.shape[-2:])}"
+        )
+    pairs = (
+        ("instance_masks", target.instance_masks, source.instance_masks),
+        ("instance_ids", target.instance_ids, source.instance_ids),
+        ("semantic_maps", target.semantic_maps, source.semantic_maps),
+        ("panoptic_maps", target.panoptic_maps, source.panoptic_maps),
+        ("depth", target.depth, source.depth),
+        ("depth_valid", target.depth_valid, source.depth_valid),
+        ("normals", target.normals, source.normals),
+        ("padding_mask", target.padding_mask, source.padding_mask),
+        ("camera_intrinsics", target.camera_intrinsics, source.camera_intrinsics),
+    )
+    for name, t, s in pairs:
+        if t is not None and s is None:
+            raise ValueError(
+                f"target carries {name!r} but source does not; "
+                "source must declare every modality the target consumes"
+            )
 
 
 def _warp_validity_gate(src_gate: Tensor, grid: Tensor) -> Tensor:
@@ -134,20 +184,27 @@ class AffinePropagator(nn.Module):
 
     Output ``PaddedBatchedDenseSample`` holds the transformed source at each
     target index; its ``instance_valid`` mirrors ``placement.paste_valid``.
+
+    ``target`` provides the output canvas geometry (``B``, ``K``, ``H``, ``W``,
+    ``device``); every modality value is gathered from ``source.x[source_idx]``.
+    Pass ``target`` and ``source`` as the same object to recover the pre-A1
+    intra-batch behavior bitwise.
     """
 
     def forward(
         self,
-        padded: PaddedBatchedDenseSample,
+        target: PaddedBatchedDenseSample,
+        source: PaddedBatchedDenseSample,
         placement: BatchedPlacement,
     ) -> PaddedBatchedDenseSample:
-        b = padded.batch_size
-        k = padded.max_instances
-        device = padded.images.device
-        _, _, h, w = padded.images.shape
+        _validate_alignment(target, source)
+        b = target.batch_size
+        k = target.max_instances
+        device = target.images.device
+        _, _, h, w = target.images.shape
 
         if b == 0:
-            return padded
+            return target
 
         grid = _build_grid(
             h,
@@ -159,24 +216,24 @@ class AffinePropagator(nn.Module):
             device,
         )
 
-        src_images = padded.images[placement.source_idx]
+        src_images = source.images[placement.source_idx]
         warped_images = grid_sample(
             src_images, grid, mode="bilinear", padding_mode="zeros", align_corners=False
         )
 
         warped_boxes = _transform_boxes(
-            padded.boxes[placement.source_idx],
+            source.boxes[placement.source_idx],
             placement.translate,
             placement.scale,
             placement.hflip,
             placement.src_valid_extent,
         )
-        warped_labels = padded.labels[placement.source_idx]
+        warped_labels = source.labels[placement.source_idx]
 
         warped_masks: Tensor | None = None
         warped_ids: Tensor | None = None
-        if padded.instance_masks is not None and padded.instance_ids is not None:
-            src_masks = padded.instance_masks[placement.source_idx].float()
+        if source.instance_masks is not None and source.instance_ids is not None:
+            src_masks = source.instance_masks[placement.source_idx].float()
             sampled = grid_sample(
                 src_masks,
                 grid,
@@ -185,11 +242,11 @@ class AffinePropagator(nn.Module):
                 align_corners=False,
             )
             warped_masks = sampled > 0.5
-            warped_ids = padded.instance_ids[placement.source_idx]
+            warped_ids = source.instance_ids[placement.source_idx]
 
         warped_semantic: SemanticMap | None = None
-        if padded.semantic_maps is not None:
-            sem = padded.semantic_maps[placement.source_idx]
+        if source.semantic_maps is not None:
+            sem = source.semantic_maps[placement.source_idx]
             sampled = grid_sample(
                 sem.unsqueeze(1).float(),
                 grid,
@@ -200,8 +257,8 @@ class AffinePropagator(nn.Module):
             warped_semantic = SemanticMap(sampled.squeeze(1).long())
 
         warped_panoptic: PanopticMap | None = None
-        if padded.panoptic_maps is not None:
-            pano = padded.panoptic_maps[placement.source_idx]
+        if source.panoptic_maps is not None:
+            pano = source.panoptic_maps[placement.source_idx]
             sampled = grid_sample(
                 pano.unsqueeze(1).float(),
                 grid,
@@ -213,8 +270,8 @@ class AffinePropagator(nn.Module):
 
         warped_depth: Tensor | None = None
         warped_depth_valid: Tensor | None = None
-        if padded.depth is not None and padded.depth_valid is not None:
-            src_depth = padded.depth[placement.source_idx]
+        if source.depth is not None and source.depth_valid is not None:
+            src_depth = source.depth[placement.source_idx]
             warped_depth = grid_sample(
                 src_depth,
                 grid,
@@ -223,12 +280,12 @@ class AffinePropagator(nn.Module):
                 align_corners=False,
             )
             warped_depth_valid = _warp_validity_gate(
-                padded.depth_valid[placement.source_idx], grid
+                source.depth_valid[placement.source_idx], grid
             )
 
         warped_normals: Tensor | None = None
-        if padded.normals is not None:
-            src_normals = padded.normals[placement.source_idx]
+        if source.normals is not None:
+            src_normals = source.normals[placement.source_idx]
             warped_n = grid_sample(
                 src_normals,
                 grid,
@@ -242,14 +299,14 @@ class AffinePropagator(nn.Module):
             warped_normals = warped_n * sign
 
         warped_intrinsics: Tensor | None = (
-            padded.camera_intrinsics[placement.source_idx]
-            if padded.camera_intrinsics is not None
+            source.camera_intrinsics[placement.source_idx]
+            if source.camera_intrinsics is not None
             else None
         )
 
         warped_padding_mask: PaddingMask | None = None
-        if padded.padding_mask is not None:
-            src_iv = ~padded.padding_mask[placement.source_idx].as_subclass(Tensor)
+        if source.padding_mask is not None:
+            src_iv = ~source.padding_mask[placement.source_idx].as_subclass(Tensor)
             warped_iv = _warp_validity_gate(src_iv, grid)
             warped_padding_mask = PaddingMask.from_tensor(~warped_iv)
 

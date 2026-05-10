@@ -177,7 +177,7 @@ class BatchCopyPaste(nn.Module):
             valid_extent=valid_extent,
             source_eligible=source_eligible,
         )
-        warped = self.propagator(padded, placement)
+        warped = self.propagator(padded, padded, placement)
         paste_mask = self._paste_mask(warped, placement)
         composited = self.compositor(padded, warped, paste_mask)
         if self.config.panoptic is not None:
