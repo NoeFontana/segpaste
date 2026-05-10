@@ -56,6 +56,7 @@ def _build_grid(
     translate: Tensor,
     scale: Tensor,
     hflip: Tensor,
+    src_valid_extent: Tensor,
     device: torch.device,
 ) -> Tensor:
     """Per-target normalized sampling grid for :func:`F.grid_sample`.
@@ -63,7 +64,13 @@ def _build_grid(
     For an output pixel ``(y, x)``, samples the source at::
 
         source_y = (y - ty) / scale
-        source_x = (x - tx) / scale, then reflected if ``hflip``
+        source_x = (x - tx) / scale, then reflected about
+                   (W_valid - 1)/2 if ``hflip``
+
+    ``src_valid_extent[i] = (h_v, w_v)`` is the source image's pre-pad extent;
+    hflip reflects about ``W_valid - 1`` so right/bottom-pad bands do not shift
+    the source content centerline. Grid normalization uses the post-pad ``(h,
+    w)`` because ``grid_sample`` reads the post-pad source tensor.
 
     Returns shape ``[B, H, W, 2]`` normalized for ``align_corners=False``.
     """
@@ -75,10 +82,11 @@ def _build_grid(
     ty = translate[:, 0].view(b, 1, 1)
     tx = translate[:, 1].view(b, 1, 1)
     s = scale.view(b, 1, 1)
+    src_w_valid = src_valid_extent[:, 1].view(b, 1, 1)
 
     src_y = (yy.unsqueeze(0) - ty) / s
     src_x = (xx.unsqueeze(0) - tx) / s
-    src_x = torch.where(hflip.view(b, 1, 1), (w - 1.0) - src_x, src_x)
+    src_x = torch.where(hflip.view(b, 1, 1), src_w_valid - 1.0 - src_x, src_x)
 
     grid_x = (src_x + 0.5) * 2.0 / w - 1.0
     grid_y = (src_y + 0.5) * 2.0 / h - 1.0
@@ -90,13 +98,13 @@ def _transform_boxes(
     translate: Tensor,
     scale: Tensor,
     hflip: Tensor,
-    w: int,
+    src_valid_extent: Tensor,
 ) -> Tensor:
     """Apply the affine to source boxes in xyxy format.
 
-    For hflipped samples x coords reflect about the source-image centerline
-    (``x' = (W - 1) - x``) before the scale+translate; corners may swap, so
-    results are canonicalized back to ``x1 <= x2``.
+    For hflipped samples x coords reflect about the source's pre-pad
+    centerline ``(W_valid - 1)/2`` before the scale+translate; corners may
+    swap, so results are canonicalized back to ``x1 <= x2``.
     """
     b, _, _ = boxes.shape
     x1 = boxes[..., 0]
@@ -105,8 +113,9 @@ def _transform_boxes(
     y2 = boxes[..., 3]
 
     flip = hflip.view(b, 1)
-    new_x1 = torch.where(flip, (w - 1.0) - x2, x1)
-    new_x2 = torch.where(flip, (w - 1.0) - x1, x2)
+    src_w_valid = src_valid_extent[:, 1:2]  # [B, 1]
+    new_x1 = torch.where(flip, src_w_valid - 1.0 - x2, x1)
+    new_x2 = torch.where(flip, src_w_valid - 1.0 - x1, x2)
 
     s = scale.view(b, 1)
     ty = translate[:, 0:1]
@@ -141,7 +150,13 @@ class AffinePropagator(nn.Module):
             return padded
 
         grid = _build_grid(
-            h, w, placement.translate, placement.scale, placement.hflip, device
+            h,
+            w,
+            placement.translate,
+            placement.scale,
+            placement.hflip,
+            placement.src_valid_extent,
+            device,
         )
 
         src_images = padded.images[placement.source_idx]
@@ -154,7 +169,7 @@ class AffinePropagator(nn.Module):
             placement.translate,
             placement.scale,
             placement.hflip,
-            w,
+            placement.src_valid_extent,
         )
         warped_labels = padded.labels[placement.source_idx]
 

@@ -70,3 +70,4 @@ nav:
       - ADR-0007 Depth-Aware Paste: adrs/0007-depth-aware-paste.md
       - ADR-0008 Batch Copy-Paste (GPU): adrs/0008-batch-copy-paste.md
       - ADR-0009 Visual Validation and Presets: adrs/0009-visual-validation-and-presets.md
+      - ADR-0010 Patch-Aligned Paste: adrs/0010-patch-aligned-paste.md

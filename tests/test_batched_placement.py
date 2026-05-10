@@ -166,6 +166,123 @@ class TestPydanticConfig:
         with pytest.raises(ValidationError):
             BatchedPlacementConfig(bogus_field=1.0)  # pyright: ignore[reportCallIssue]
 
+    def test_pad_to_multiple_must_be_positive(self) -> None:
+        with pytest.raises(ValidationError):
+            BatchedPlacementConfig(pad_to_multiple=0)
+        with pytest.raises(ValidationError):
+            BatchedPlacementConfig(pad_to_multiple=-1)
+
+    def test_patch_aligned_paste_requires_pad_to_multiple(self) -> None:
+        with pytest.raises(ValidationError):
+            BatchedPlacementConfig(patch_aligned_paste=True)
+
+    def test_default_config_has_no_alignment(self) -> None:
+        cfg = BatchedPlacementConfig()
+        assert cfg.pad_to_multiple is None
+        assert cfg.patch_aligned_paste is False
+
+
+class TestPatchAlignedPaste:
+    @pytest.mark.parametrize("p", [14, 16])
+    def test_translate_snapped_to_multiples_of_p(self, p: int) -> None:
+        # Canvas H=W=p*4, divisible by p so quanta = p/H = 1/4
+        # (4 grid points per p-pixel).
+        size = p * 4
+        padded = _padded(b=4, h=size, w=size, k=5)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(
+                scale_range=(0.5, 1.5),
+                pad_to_multiple=p,
+                patch_aligned_paste=True,
+            )
+        )
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        ty = out.translate[:, 0]
+        tx = out.translate[:, 1]
+        assert bool((ty % p == 0).all())
+        assert bool((tx % p == 0).all())
+
+    @pytest.mark.parametrize("p", [14, 16])
+    def test_scaled_extent_multiple_of_p(self, p: int) -> None:
+        size = p * 4
+        padded = _padded(b=4, h=size, w=size, k=5)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(
+                scale_range=(0.5, 1.5),
+                pad_to_multiple=p,
+                patch_aligned_paste=True,
+            )
+        )
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        h_scaled = torch.floor(out.scale * size).long()
+        w_scaled = torch.floor(out.scale * size).long()
+        assert bool((h_scaled % p == 0).all())
+        assert bool((w_scaled % p == 0).all())
+
+    def test_paste_rate_within_5pct_of_unaligned(self) -> None:
+        """Paste-rate degradation when patch_aligned_paste=True must be <5%."""
+        p = 14
+        size = p * 4  # 56
+        rates_aligned: list[float] = []
+        rates_unaligned: list[float] = []
+        for seed in range(20):
+            padded = _padded(b=8, h=size, w=size, k=5)
+            unaligned = BatchedPlacementSampler(
+                BatchedPlacementConfig(scale_range=(0.5, 1.5))
+            )(padded, torch.Generator().manual_seed(seed))
+            aligned = BatchedPlacementSampler(
+                BatchedPlacementConfig(
+                    scale_range=(0.5, 1.5),
+                    pad_to_multiple=p,
+                    patch_aligned_paste=True,
+                )
+            )(padded, torch.Generator().manual_seed(seed))
+            rates_unaligned.append(unaligned.paste_valid.float().mean().item())
+            rates_aligned.append(aligned.paste_valid.float().mean().item())
+        baseline = sum(rates_unaligned) / len(rates_unaligned)
+        aligned_rate = sum(rates_aligned) / len(rates_aligned)
+        assert aligned_rate >= 0.95 * baseline, (
+            f"aligned={aligned_rate:.3f} < 0.95 * unaligned={baseline:.3f}"
+        )
+
+    def test_coarse_quanta_raises(self) -> None:
+        # gcd(518, 686) = 14, p=14, quanta=1.0 — no integer in (0.5, 0.6).
+        padded = _padded(b=2, h=518, w=686, k=3)
+        sampler = BatchedPlacementSampler(
+            BatchedPlacementConfig(
+                scale_range=(0.5, 0.6),
+                pad_to_multiple=14,
+                patch_aligned_paste=True,
+            )
+        )
+        with pytest.raises(RuntimeError, match="patch_aligned_paste"):
+            sampler(padded, torch.Generator().manual_seed(0))
+
+
+class TestSrcValidExtent:
+    def test_src_valid_extent_indexed_from_valid_extent(self) -> None:
+        padded = _padded(b=4, h=32, w=32, k=5)
+        ve = torch.tensor(
+            [[20.0, 24.0], [16.0, 32.0], [32.0, 16.0], [28.0, 28.0]],
+            dtype=torch.float32,
+        )
+        sampler = _sampler(scale_range=(0.5, 1.0))
+        out = sampler(padded, torch.Generator().manual_seed(0), valid_extent=ve)
+        assert out.src_valid_extent is not None
+        assert out.src_valid_extent.shape == (4, 2)
+        # Each src_valid_extent[i] equals ve[source_idx[i]].
+        expected = ve[out.source_idx]
+        assert torch.equal(out.src_valid_extent, expected)
+
+    def test_src_valid_extent_default_when_valid_extent_none(self) -> None:
+        padded = _padded(b=4, h=32, w=32, k=5)
+        sampler = _sampler(scale_range=(1.0, 1.0))
+        out = sampler(padded, torch.Generator().manual_seed(0))
+        assert out.src_valid_extent is not None
+        # Without valid_extent, every row is [H, W].
+        assert bool((out.src_valid_extent[:, 0] == 32.0).all())
+        assert bool((out.src_valid_extent[:, 1] == 32.0).all())
+
 
 def _small_box_sample(seed: int) -> DenseSample:
     """Single 6x6 mask anchored at (2, 2) in a 32x32 canvas — fits in [0, 16]^2."""
