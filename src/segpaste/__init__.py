@@ -12,6 +12,7 @@ except ImportError:
 
 from segpaste._internal.bank import InstanceBank
 from segpaste.augmentation import (
+    BankSource,
     BatchCopyPaste,
     FixedSizeCrop,
     IntraBatchSource,
@@ -38,6 +39,7 @@ from segpaste.types import (
 __version__: str = _pkg_version("segpaste")
 
 __all__ = [
+    "BankSource",
     "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",

@@ -199,7 +199,10 @@ class AffinePropagator(nn.Module):
     ) -> PaddedBatchedDenseSample:
         _validate_alignment(target, source)
         b = target.batch_size
-        k = target.max_instances
+        # ``k`` is the source view's K — the output carries one warped row
+        # per source slot. For ``IntraBatchSource``, ``source is target`` so
+        # ``k == target.max_instances`` and behavior matches v0.3.0.
+        k = source.max_instances
         device = target.images.device
         _, _, h, w = target.images.shape
 
