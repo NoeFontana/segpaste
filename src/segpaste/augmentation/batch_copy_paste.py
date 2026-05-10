@@ -45,7 +45,12 @@ from segpaste._internal.gpu.batched_placement import (
 )
 from segpaste._internal.gpu.pad_canvas import pad_canvas_to_multiple
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
-from segpaste.augmentation.source import IntraBatchSource, SourceStrategy
+from segpaste.augmentation.source import SourceStrategy
+from segpaste.augmentation.source_config import (
+    IntraBatchSourceConfig,
+    SourceConfig,
+    build_source_strategy,
+)
 from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
 
@@ -94,6 +99,12 @@ class BatchCopyPasteConfig(BaseModel):
     stuff-area-threshold post-composite revert (ADR-0006). ``None``
     leaves the augmentation panoptic-agnostic (default)."""
 
+    source: SourceConfig = Field(default_factory=IntraBatchSourceConfig)
+    """Source-selection strategy (ADR-0011). Default
+    :class:`IntraBatchSourceConfig` reproduces v0.3.0 intra-batch source
+    sampling bitwise. A1 PR7 widens the discriminated union to include
+    ``BankSourceConfig`` for the external instance bank."""
+
 
 def drop_occluded_targets(
     padded: PaddedBatchedDenseSample,
@@ -133,8 +144,8 @@ class BatchCopyPaste(nn.Module):
     ) -> None:
         super().__init__()
         self.config = config or BatchCopyPasteConfig()
-        self.source_strategy: SourceStrategy = source_strategy or IntraBatchSource(
-            self.config.placement
+        self.source_strategy: SourceStrategy = source_strategy or build_source_strategy(
+            self.config.source, self.config.placement
         )
         self.propagator = AffinePropagator()
         self.compositor = TileCompositor(self.config.composite)
