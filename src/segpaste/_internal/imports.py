@@ -47,3 +47,14 @@ def require_lmdb() -> ModuleType:
             "lmdb is not installed. Install with `uv sync --group bank-lmdb`."
         ) from exc
     return lmdb
+
+
+def require_pyarrow() -> ModuleType:
+    """Return ``pyarrow`` or raise with an install hint."""
+    try:
+        import pyarrow
+    except ImportError as exc:
+        raise ImportError(
+            "pyarrow is not installed. Install with `uv sync --group bank-webdataset`."
+        ) from exc
+    return pyarrow

@@ -48,6 +48,10 @@ bank-memmap = ["numpy>=1.26"]
 bank-lmdb = [
     "lmdb>=1.4",
 ]
+bank-webdataset = [
+    "pyarrow>=15",
+    "webdataset>=0.2.86",
+]
 
 [project.urls]
 Homepage = "https://github.com/NoeFontana/segpaste"

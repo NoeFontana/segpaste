@@ -38,7 +38,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--coco-json", type=Path, required=True)
     parser.add_argument("--image-dir", type=Path, required=True)
-    parser.add_argument("--out-format", choices=("memmap", "lmdb"), required=True)
+    parser.add_argument(
+        "--out-format", choices=("memmap", "lmdb", "webdataset"), required=True
+    )
     parser.add_argument("--out-path", type=Path, required=True)
     parser.add_argument("--crop-size", type=int, default=224)
     parser.add_argument("--min-area", type=int, default=256)
@@ -63,7 +65,8 @@ def main() -> int:
         min_area=args.min_area,
     )
     out_format = cast(Format, args.out_format)
-    print(        f"[build_instance_bank] reading {args.coco_json}, "
+    print(
+        f"[build_instance_bank] reading {args.coco_json}, "
         f"writing {out_format} bank to {args.out_path}"
     )
     out_path = build_bank(

@@ -22,9 +22,10 @@ from typing import Any, Literal
 from segpaste._internal.bank.lmdb_backend import write_lmdb_bank
 from segpaste._internal.bank.memmap import write_memmap_bank
 from segpaste._internal.bank.protocol import BankCrop
+from segpaste._internal.bank.webdataset_backend import write_webdataset_bank
 from segpaste._internal.imports import require_numpy
 
-Format = Literal["memmap", "lmdb"]
+Format = Literal["memmap", "lmdb", "webdataset"]
 
 
 def crops_from_coco(
@@ -180,6 +181,17 @@ def build_bank(
         )
     if out_format == "lmdb":
         return write_lmdb_bank(
+            out_path,
+            images=images_arr,
+            alpha=alphas_arr,
+            classes=classes_arr,
+            num_classes=num_classes,
+            embeddings=embeddings_arr,
+            build_seed=base_seed,
+            segpaste_version=segpaste_version,
+        )
+    if out_format == "webdataset":
+        return write_webdataset_bank(
             out_path,
             images=images_arr,
             alpha=alphas_arr,
