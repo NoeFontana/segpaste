@@ -42,10 +42,10 @@ from segpaste._internal.gpu.affine_propagate import AffinePropagator
 from segpaste._internal.gpu.batched_placement import (
     BatchedPlacement,
     BatchedPlacementConfig,
-    BatchedPlacementSampler,
 )
 from segpaste._internal.gpu.pad_canvas import pad_canvas_to_multiple
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
+from segpaste.augmentation.source import IntraBatchSource, SourceStrategy
 from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
 
@@ -125,10 +125,17 @@ class BatchCopyPaste(nn.Module):
     thing_classes: Tensor
     stuff_classes: Tensor
 
-    def __init__(self, config: BatchCopyPasteConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: BatchCopyPasteConfig | None = None,
+        *,
+        source_strategy: SourceStrategy | None = None,
+    ) -> None:
         super().__init__()
         self.config = config or BatchCopyPasteConfig()
-        self.placement_sampler = BatchedPlacementSampler(self.config.placement)
+        self.source_strategy: SourceStrategy = source_strategy or IntraBatchSource(
+            self.config.placement
+        )
         self.propagator = AffinePropagator()
         self.compositor = TileCompositor(self.config.composite)
 
@@ -171,13 +178,13 @@ class BatchCopyPaste(nn.Module):
 
         valid_extent = self._valid_extent(padded)
         source_eligible = self._source_eligible(padded)
-        placement = self.placement_sampler(
+        source_view, placement = self.source_strategy.sample(
             padded,
+            valid_extent,
+            source_eligible,
             generator,
-            valid_extent=valid_extent,
-            source_eligible=source_eligible,
         )
-        warped = self.propagator(padded, padded, placement)
+        warped = self.propagator(padded, source_view, placement)
         paste_mask = self._paste_mask(warped, placement)
         composited = self.compositor(padded, warped, paste_mask)
         if self.config.panoptic is not None:

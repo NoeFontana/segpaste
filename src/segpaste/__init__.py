@@ -13,8 +13,10 @@ except ImportError:
 from segpaste.augmentation import (
     BatchCopyPaste,
     FixedSizeCrop,
+    IntraBatchSource,
     RandomResize,
     SanitizeBoundingBoxes,
+    SourceStrategy,
     make_large_scale_jittering,
 )
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
@@ -42,6 +44,7 @@ __all__ = [
     "DenseSample",
     "FixedSizeCrop",
     "InstanceMask",
+    "IntraBatchSource",
     "Modality",
     "PaddedBatchedDenseSample",
     "PaddingMask",
@@ -51,6 +54,7 @@ __all__ = [
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SemanticMap",
+    "SourceStrategy",
     "__version__",
     "create_coco_dataloader",
     "get_preset",
