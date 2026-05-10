@@ -99,7 +99,7 @@ class TestShapeAndOutputType:
             b=2, k=3, with_semantic=True, with_depth=True, with_normals=True
         )
         placement = _identity_placement(2, 3, padded.images.device)
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert isinstance(out, PaddedBatchedDenseSample)
         assert out.images.shape == (2, 3, H, W)
         assert out.boxes.shape == (2, 3, 4)
@@ -116,7 +116,7 @@ class TestIdentityAffine:
     def test_identity_image_equals_source(self) -> None:
         padded = _padded(b=2, k=3)
         placement = _identity_placement(2, 3, padded.images.device)
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         src_images = padded.images.as_subclass(torch.Tensor)[placement.source_idx]
         out_t = out.images.as_subclass(torch.Tensor)
         # Bilinear grid_sample with align_corners=False on an integer-grid
@@ -126,7 +126,7 @@ class TestIdentityAffine:
     def test_identity_masks_preserve_cardinality(self) -> None:
         padded = _padded(b=2, k=3)
         placement = _identity_placement(2, 3, padded.images.device)
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert out.instance_masks is not None
         assert padded.instance_masks is not None
         src_masks = padded.instance_masks[placement.source_idx]
@@ -146,7 +146,7 @@ class TestTranslation:
             paste_valid=torch.ones((b, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(b),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert out.instance_masks is not None
         src = padded.instance_masks  # pyright: ignore[reportOptionalMemberAccess]
         assert src is not None
@@ -169,7 +169,7 @@ class TestTranslation:
             paste_valid=torch.ones((b, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(b),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         src_boxes = padded.boxes[placement.source_idx]
         expected = src_boxes.clone()
         expected[0, :, [0, 2]] += 4.0
@@ -188,7 +188,7 @@ class TestHflip:
             paste_valid=torch.ones((2, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(2),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert padded.instance_masks is not None
         assert out.instance_masks is not None
         expected = padded.instance_masks[1, 0].flip(dims=[-1])
@@ -204,7 +204,7 @@ class TestHflip:
             paste_valid=torch.ones((2, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(2),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert padded.normals is not None
         assert out.normals is not None
         # Source normals x-channel reflected spatially AND negated on hflip row.
@@ -225,7 +225,7 @@ class TestNearestMaskIntegrity:
             paste_valid=torch.ones((2, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(2),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert out.instance_masks is not None
         vals = out.instance_masks.unique()
         assert set(vals.tolist()).issubset({False, True})
@@ -242,7 +242,7 @@ class TestDepthValid:
             paste_valid=torch.ones((2, 3), dtype=torch.bool),
             src_valid_extent=_full_extent(2),
         )
-        out = AffinePropagator()(padded, placement)
+        out = AffinePropagator()(padded, padded, placement)
         assert out.depth_valid is not None
         # Origin is outside the translated footprint; should be invalid.
         assert not bool(out.depth_valid[0, 0, 0, 0].item())
@@ -308,7 +308,7 @@ class TestHflipWithPad:
             [[[0.0, 0.0, 0.0, 0.0]], [[4.0, 5.0, 5.0, 6.0]]], dtype=torch.float32
         )
         padded = self._padded(images=images, masks=masks, boxes=boxes)
-        out = AffinePropagator()(padded, self._hflip_placement())
+        out = AffinePropagator()(padded, padded, self._hflip_placement())
         assert out.instance_masks is not None
         assert bool(out.instance_masks[0, 0, 5, 19].item())
         assert not bool(out.instance_masks[0, 0, 5, 27].item())
@@ -322,6 +322,6 @@ class TestHflipWithPad:
             [[[0.0, 0.0, 0.0, 0.0]], [[4.0, 5.0, 10.0, 8.0]]], dtype=torch.float32
         )
         padded = self._padded(images=images, masks=masks, boxes=boxes)
-        out = AffinePropagator()(padded, self._hflip_placement())
+        out = AffinePropagator()(padded, padded, self._hflip_placement())
         assert out.boxes[0, 0, 0].item() == pytest.approx(13.0)
         assert out.boxes[0, 0, 2].item() == pytest.approx(19.0)

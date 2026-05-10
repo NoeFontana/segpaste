@@ -10,11 +10,15 @@ try:
 except ImportError:
     logging.getLogger(__file__).warning("faster_coco_eval not found.")
 
+from segpaste._internal.bank import InstanceBank
 from segpaste.augmentation import (
+    BankSource,
     BatchCopyPaste,
     FixedSizeCrop,
+    IntraBatchSource,
     RandomResize,
     SanitizeBoundingBoxes,
+    SourceStrategy,
     make_large_scale_jittering,
 )
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
@@ -35,13 +39,16 @@ from segpaste.types import (
 __version__: str = _pkg_version("segpaste")
 
 __all__ = [
+    "BankSource",
     "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",
     "CocoDetectionV2",
     "DenseSample",
     "FixedSizeCrop",
+    "InstanceBank",
     "InstanceMask",
+    "IntraBatchSource",
     "Modality",
     "PaddedBatchedDenseSample",
     "PaddingMask",
@@ -51,6 +58,7 @@ __all__ = [
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SemanticMap",
+    "SourceStrategy",
     "__version__",
     "create_coco_dataloader",
     "get_preset",

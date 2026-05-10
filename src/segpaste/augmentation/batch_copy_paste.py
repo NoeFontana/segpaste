@@ -42,10 +42,15 @@ from segpaste._internal.gpu.affine_propagate import AffinePropagator
 from segpaste._internal.gpu.batched_placement import (
     BatchedPlacement,
     BatchedPlacementConfig,
-    BatchedPlacementSampler,
 )
 from segpaste._internal.gpu.pad_canvas import pad_canvas_to_multiple
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
+from segpaste.augmentation.source import SourceStrategy
+from segpaste.augmentation.source_config import (
+    IntraBatchSourceConfig,
+    SourceConfig,
+    build_source_strategy,
+)
 from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
 
@@ -94,6 +99,12 @@ class BatchCopyPasteConfig(BaseModel):
     stuff-area-threshold post-composite revert (ADR-0006). ``None``
     leaves the augmentation panoptic-agnostic (default)."""
 
+    source: SourceConfig = Field(default_factory=IntraBatchSourceConfig)
+    """Source-selection strategy (ADR-0011). Default
+    :class:`IntraBatchSourceConfig` reproduces v0.3.0 intra-batch source
+    sampling bitwise. A1 PR7 widens the discriminated union to include
+    ``BankSourceConfig`` for the external instance bank."""
+
 
 def drop_occluded_targets(
     padded: PaddedBatchedDenseSample,
@@ -125,10 +136,17 @@ class BatchCopyPaste(nn.Module):
     thing_classes: Tensor
     stuff_classes: Tensor
 
-    def __init__(self, config: BatchCopyPasteConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: BatchCopyPasteConfig | None = None,
+        *,
+        source_strategy: SourceStrategy | None = None,
+    ) -> None:
         super().__init__()
         self.config = config or BatchCopyPasteConfig()
-        self.placement_sampler = BatchedPlacementSampler(self.config.placement)
+        self.source_strategy: SourceStrategy = source_strategy or build_source_strategy(
+            self.config.source, self.config.placement
+        )
         self.propagator = AffinePropagator()
         self.compositor = TileCompositor(self.config.composite)
 
@@ -171,13 +189,13 @@ class BatchCopyPaste(nn.Module):
 
         valid_extent = self._valid_extent(padded)
         source_eligible = self._source_eligible(padded)
-        placement = self.placement_sampler(
+        source_view, placement = self.source_strategy.sample(
             padded,
+            valid_extent,
+            source_eligible,
             generator,
-            valid_extent=valid_extent,
-            source_eligible=source_eligible,
         )
-        warped = self.propagator(padded, placement)
+        warped = self.propagator(padded, source_view, placement)
         paste_mask = self._paste_mask(warped, placement)
         composited = self.compositor(padded, warped, paste_mask)
         if self.config.panoptic is not None:
@@ -326,8 +344,8 @@ class BatchCopyPaste(nn.Module):
         surplus is dropped. The remap is computed via a ``[B, K, K]``
         rank-equality match — graph-clean and inexpensive at COCO scale.
         """
-        pv = placement.paste_valid  # [B, K]
-        free = ~composited.instance_valid  # [B, K]
+        pv = placement.paste_valid  # [B, K_s]
+        free = ~composited.instance_valid  # [B, K_t]
 
         # Pair the n-th free target slot with the n-th source paste slot via
         # rank-equality. Ranks are unique per row, so each match row has
@@ -339,15 +357,15 @@ class BatchCopyPaste(nn.Module):
             & pv.unsqueeze(-2)
             & (free_rank.unsqueeze(-1) == paste_rank.unsqueeze(-2))
         )  # [B, K_t, K_s]
-        receives = match.any(dim=-1)  # [B, K]
+        receives = match.any(dim=-1)  # [B, K_t]
         # argmax returns 0 where no match — guarded by `receives` in `where`.
-        src_k = match.long().argmax(dim=-1)
+        src_k = match.long().argmax(dim=-1)  # [B, K_t] (indices into K_s)
 
-        b, k = pv.shape
-        batch_idx = torch.arange(b, device=pv.device).unsqueeze(-1).expand(b, k)
+        b, k_t = composited.instance_valid.shape
+        batch_idx = torch.arange(b, device=pv.device).unsqueeze(-1).expand(b, k_t)
 
         def gather(src: Tensor, dst: Tensor) -> Tensor:
-            sel = receives.view(b, k, *([1] * (src.ndim - 2)))
+            sel = receives.view(b, k_t, *([1] * (src.ndim - 2)))
             return torch.where(sel, src[batch_idx, src_k], dst)
 
         merged_boxes = gather(warped.boxes, composited.boxes)

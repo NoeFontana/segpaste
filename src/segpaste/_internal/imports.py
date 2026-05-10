@@ -25,3 +25,36 @@ def require_huggingface_hub() -> ModuleType:
             "huggingface_hub is not installed. Install with `uv sync --group eval`."
         ) from exc
     return huggingface_hub
+
+
+def require_numpy() -> ModuleType:
+    """Return the imported ``numpy`` module or raise with an install hint."""
+    try:
+        import numpy
+    except ImportError as exc:
+        raise ImportError(
+            "numpy is not installed. Install with `uv sync --group bank-memmap`."
+        ) from exc
+    return numpy
+
+
+def require_lmdb() -> ModuleType:
+    """Return the imported ``lmdb`` module or raise with an install hint."""
+    try:
+        import lmdb
+    except ImportError as exc:
+        raise ImportError(
+            "lmdb is not installed. Install with `uv sync --group bank-lmdb`."
+        ) from exc
+    return lmdb
+
+
+def require_pyarrow() -> ModuleType:
+    """Return ``pyarrow`` or raise with an install hint."""
+    try:
+        import pyarrow
+    except ImportError as exc:
+        raise ImportError(
+            "pyarrow is not installed. Install with `uv sync --group bank-webdataset`."
+        ) from exc
+    return pyarrow

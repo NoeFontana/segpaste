@@ -8,12 +8,20 @@ from segpaste.augmentation.lsj import (
     make_large_scale_jittering,
 )
 from segpaste.augmentation.sanitize import SanitizeInstances
+from segpaste.augmentation.source import (
+    BankSource,
+    IntraBatchSource,
+    SourceStrategy,
+)
 
 __all__ = [
+    "BankSource",
     "BatchCopyPaste",
     "FixedSizeCrop",
+    "IntraBatchSource",
     "RandomResize",
     "SanitizeBoundingBoxes",
     "SanitizeInstances",
+    "SourceStrategy",
     "make_large_scale_jittering",
 ]
