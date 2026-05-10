@@ -44,6 +44,7 @@ from segpaste._internal.gpu.batched_placement import (
     BatchedPlacementConfig,
     BatchedPlacementSampler,
 )
+from segpaste._internal.gpu.pad_canvas import pad_canvas_to_multiple
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
 from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
@@ -146,10 +147,12 @@ class BatchCopyPaste(nn.Module):
                 "stuff_classes", torch.tensor(stuffs, dtype=torch.int64)
             )
             self._class_table_size = max([*things, *stuffs, taxonomy.ignore_index]) + 1
+            self._pad_ignore_index = taxonomy.ignore_index
         else:
             self.register_buffer("thing_classes", torch.empty((0,), dtype=torch.int64))
             self.register_buffer("stuff_classes", torch.empty((0,), dtype=torch.int64))
             self._class_table_size = 0
+            self._pad_ignore_index = 255
 
     def forward(
         self,
@@ -158,6 +161,13 @@ class BatchCopyPaste(nn.Module):
     ) -> PaddedBatchedDenseSample:
         if padded.batch_size == 0:
             return padded
+
+        if self.config.placement.pad_to_multiple is not None:
+            padded = pad_canvas_to_multiple(
+                padded,
+                self.config.placement.pad_to_multiple,
+                self._pad_ignore_index,
+            )
 
         valid_extent = self._valid_extent(padded)
         source_eligible = self._source_eligible(padded)
