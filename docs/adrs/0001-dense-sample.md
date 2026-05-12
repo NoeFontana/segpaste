@@ -71,11 +71,12 @@ from the existing `hatch-vcs` dynamic version (via
 
 The explicit private namespace. Anything not in `segpaste.__all__` is
 `_internal` regardless of its current path. P1 migrates the current
-non-exported modules (`segpaste.processing.*`, parts of
-`segpaste.integrations.*`, `segpaste.compile_util`, `segpaste.types.*`
-beyond the exported symbols) under `_internal` or re-homes them behind
-stable entry points. No intermediate state — every module is either in the
-public surface or under `_internal`.
+non-exported modules (parts of `segpaste.integrations.*`,
+`segpaste.compile_util`, `segpaste.types.*` beyond the exported symbols)
+under `_internal` or re-homes them behind stable entry points. No
+intermediate state — every module is either in the public surface or
+under `_internal`. (`segpaste.processing.*` was deleted outright in
+ADR-0012's PR; its sole live consumer was inlined.)
 
 ### `segpaste.experimental`
 
@@ -116,6 +117,14 @@ to `Literal["alpha"]`. Constructing `CopyPasteConfig(blend_mode="gaussian")`
 raises a Pydantic validation error. `"gaussian"` and `"poisson"` remain
 **reserved** names; P1 does not re-introduce them. A future ADR that wires
 a new blend mode is an additive change.
+
+> **Superseded by [ADR-0012](0012-image-harmonization.md).** The
+> `CopyPasteConfig` container itself was deleted in v0.3.0 (ADR-0008
+> hard-deprecation). The reservation note above is closed by ADR-0012,
+> which adds `HarmonizeConfig` on `BatchCopyPasteConfig` with
+> `mode: Literal["reinhard", "multiband", "poisson"]`. The legacy
+> `"gaussian"` name is not revived (the multi-band Burt-Adelson method
+> supersedes it).
 
 ---
 

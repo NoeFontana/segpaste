@@ -163,6 +163,15 @@ align with real scene depth edges and match gradient-matching losses,
 whereas Gaussian feathering would create synthetic depth ramps that are
 neither plausible nor in-distribution for monocular-depth models.
 
+> **Moot post-v0.3.0.** `DepthAwarePasteConfig` and the entire CPU
+> wrapper class were deleted in v0.3.0 (ADR-0008 hard-deprecation). The
+> GPU successor `BatchCopyPaste` exposes harmonization via
+> `BatchCopyPasteConfig.harmonize` (ADR-0012). The §3d
+> Gaussian-on-depth concern is preserved in spirit: ADR-0012's three
+> harmonization modes operate on the **image channel only** — depth,
+> normals, and label modalities still composite under the nearest-sample
+> alpha-where in `TileCompositor`, never under a smoothed blend.
+
 ### 7. H-flip as wrapper-level preprocessing
 
 `DepthAwarePaste._maybe_hflip_source(source, rng)` flips the source

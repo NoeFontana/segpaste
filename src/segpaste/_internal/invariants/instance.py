@@ -7,7 +7,6 @@ from torchvision.ops import masks_to_boxes
 
 from segpaste._internal.invariants._report import InvariantReport, raise_if_violated
 from segpaste._internal.invariants._require import require
-from segpaste.processing import compute_mask_area
 from segpaste.types import DenseSample
 
 
@@ -145,7 +144,7 @@ def check_instance_small_area_dropped(sample: DenseSample, tau: int) -> Invarian
     if masks.size(0) == 0:
         return InvariantReport(name=name, ok=True)
 
-    areas = compute_mask_area(masks.to(torch.bool))
+    areas = masks.to(torch.bool).sum(dim=(1, 2))
     too_small = areas < tau
     if bool(too_small.any()):
         violator_count = int(too_small.sum().item())

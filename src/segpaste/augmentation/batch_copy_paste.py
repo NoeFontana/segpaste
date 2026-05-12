@@ -43,6 +43,7 @@ from segpaste._internal.gpu.batched_placement import (
     BatchedPlacement,
     BatchedPlacementConfig,
 )
+from segpaste._internal.gpu.harmonize import HarmonizeConfig, ImageHarmonizer
 from segpaste._internal.gpu.pad_canvas import pad_canvas_to_multiple
 from segpaste._internal.gpu.tile_composite import TileCompositor, TileCompositorConfig
 from segpaste.augmentation.source import SourceStrategy
@@ -85,6 +86,13 @@ class BatchCopyPasteConfig(BaseModel):
 
     composite: TileCompositorConfig = Field(default_factory=TileCompositorConfig)
     """Parameters for :class:`TileCompositor`."""
+
+    harmonize: HarmonizeConfig = Field(default_factory=HarmonizeConfig)
+    """Image-harmonization knobs (ADR-0012). Default ``HarmonizeConfig()`` has
+    ``prob=0.0`` — the harmonizer is a graph-clean identity and the warped
+    image flows through to :class:`TileCompositor` unchanged, preserving
+    v0.3.0 bitwise behavior. Set ``prob > 0`` to engage Reinhard / multi-band
+    / Poisson harmonization on the warped image before composite."""
 
     min_residual_area_frac: float = Field(default=0.1, ge=0.0, le=1.0)
     """Drop a target instance when its survivor mask retains less than this
@@ -148,6 +156,7 @@ class BatchCopyPaste(nn.Module):
             self.config.source, self.config.placement
         )
         self.propagator = AffinePropagator()
+        self.harmonizer = ImageHarmonizer(self.config.harmonize)
         self.compositor = TileCompositor(self.config.composite)
 
         if self.config.panoptic is not None:
@@ -197,6 +206,7 @@ class BatchCopyPaste(nn.Module):
         )
         warped = self.propagator(padded, source_view, placement)
         paste_mask = self._paste_mask(warped, placement)
+        warped = self.harmonizer(padded, warped, paste_mask, generator)
         composited = self.compositor(padded, warped, paste_mask)
         if self.config.panoptic is not None:
             composited, warped = self._revert_stuff_collapse(

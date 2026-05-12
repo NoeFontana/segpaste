@@ -14,6 +14,18 @@ Single-commit hard-deprecation of the entire CPU augmentation stack per
 
 ### Added
 
+- `BatchCopyPasteConfig.harmonize: HarmonizeConfig` — torch-native image
+  harmonization between `AffinePropagator` and `TileCompositor`
+  ([ADR-0012](docs/adrs/0012-image-harmonization.md)). Three modes —
+  Reinhard 2001 statistical color transfer, Burt-Adelson 1983 multi-band
+  pyramid blending, and Pérez et al. 2003 Poisson cloning via the
+  type-I DST. Per-image `prob` knob (default `0.0` — graph-clean
+  identity, v0.3.0 byte-for-byte preserved) gates a bernoulli curriculum
+  between harmonized and un-harmonized composites. Closes the v0.2.0
+  reservation note for `blend_mode` `"gaussian"` / `"poisson"` (the
+  legacy `"gaussian"` name is not revived; multi-band supersedes it).
+  Zero new top-level dependencies; `scripts/compile_allowlist.txt`
+  remains empty.
 - `segpaste.BatchCopyPaste` — graph-compilable `nn.Module`
   (`torch.compile(fullgraph=True)` clean) that subsumes instance,
   panoptic, depth-aware, and classmix paste under one GPU pipeline:
@@ -47,6 +59,13 @@ Single-commit hard-deprecation of the entire CPU augmentation stack per
 
 ### Removed
 
+- `segpaste.processing` subpackage (`alpha_blend`, `gaussian_blend`,
+  `blend_with_mode`, `create_smooth_mask_border`, `boxes_to_masks`,
+  `compute_mask_area`) — orphan pre-v0.3.0 helpers, never reached by the
+  GPU pipeline; deleted outright per ADR-0003 hard-deprecation. The sole
+  live consumer (`compute_mask_area` in
+  `_internal/invariants/instance.py`) is inlined to
+  `masks.sum(dim=(1, 2))`.
 - `segpaste.CopyPasteCollator`, `segpaste.CopyPasteAugmentation`,
   `segpaste.CopyPasteConfig` — replaced by `BatchCopyPaste`.
 - `InstancePaste`, `PanopticPaste`, `DepthAwarePaste`, `ClassMix` —
