@@ -11,7 +11,7 @@ def require_fiftyone() -> ModuleType:
         import fiftyone
     except ImportError as exc:
         raise ImportError(
-            "fiftyone is not installed. Install with `uv sync --group viewer`."
+            "fiftyone is not installed. Install with `uv sync --group visualize`."
         ) from exc
     return fiftyone
 

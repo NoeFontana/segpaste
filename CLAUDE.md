@@ -54,7 +54,7 @@ The pixelwise where-composite primitive lives in `_internal/composite.py::DenseC
 
 ### COCO integration (`integrations/coco.py`)
 
-`CocoDetectionV2` wraps `faster_coco_eval`'s `COCO` and yields `(image, target_dict)` where `target_dict` is already shaped for transforms v2 (`tv_tensors.BoundingBoxes` in XYXY, `tv_tensors.Mask`, optional `PaddingMask` of zeros). `segpaste/__init__.py` calls `faster_coco_eval.init_as_pycocotools()` at import time to shim the pycocotools API. `fiftyone` is an optional extra (`uv sync --extra coco`) used by `create_coco_dataloader`.
+`CocoDetectionV2` wraps `faster_coco_eval`'s `COCO` and yields `(image, target_dict)` where `target_dict` is already shaped for transforms v2 (`tv_tensors.BoundingBoxes` in XYXY, `tv_tensors.Mask`, optional `PaddingMask` of zeros). `segpaste/__init__.py` calls `faster_coco_eval.init_as_pycocotools()` at import time to shim the pycocotools API. `fiftyone` is a visualizer-only optional dependency (`uv sync --group visualize`, per ADR-0013) and is not used by the data-loading path.
 
 ## Public surface
 

@@ -1,13 +1,16 @@
-"""Filesystem writer for the gallery directory."""
+"""Filesystem writer for the gallery directory.
+
+Writes one ``aug.png`` per sample (consumed as the FO Sample's
+``filepath``) plus the three JSON artifacts that ADR-0009 §5 mandates
+for paste-into-PR-body.
+"""
 
 from __future__ import annotations
 
 import datetime as _dt
 import hashlib
 import json
-import os
 import platform
-import shutil
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
@@ -16,7 +19,6 @@ from pydantic import BaseModel
 from torch import Tensor
 from torchvision.io import write_png
 
-from segpaste._internal.viz.contact_sheet import compose_contact_sheet
 from segpaste._internal.viz.manifest import (
     DatasetManifest,
     DatasetSampleEntry,
@@ -29,14 +31,13 @@ from segpaste._internal.viz.pipeline import SampleOutcome
 from segpaste.types import DenseSample
 
 
-def sample_path(out_dir: Path, index: int, view: str) -> Path:
-    """Path of the per-sample drilldown tile under *out_dir*.
+def sample_path(out_dir: Path, index: int) -> Path:
+    """Path of the augmented-image PNG for sample *index* under *out_dir*.
 
-    The ``samples/{index:04d}_{view}.png`` layout is owned by this
-    module; consumers (``fiftyone_export``) call this helper rather
-    than re-constructing the path so renames stay in one place.
+    Consumers (``fiftyone_export``) call this helper rather than
+    re-constructing the path so renames stay in one place.
     """
-    return out_dir / "samples" / f"{index:04d}_{view}.png"
+    return out_dir / "samples" / f"{index:04d}_aug.png"
 
 
 def write_gallery(
@@ -47,27 +48,18 @@ def write_gallery(
     seed: int,
     batch_size: int,
     device: str,
+    source: str,
 ) -> bool:
     """Write the full artifact tree under *out_dir*. Return True iff all OK."""
     out_dir.mkdir(parents=True, exist_ok=True)
     samples_dir = out_dir / "samples"
     samples_dir.mkdir(exist_ok=True)
-    failed_dir = out_dir / "_failed"
 
     all_ok = True
     for outcome in outcomes:
-        for view, tile in outcome.drilldown.items():
-            tile_path = sample_path(out_dir, outcome.index, view)
-            _write_png(tile_path, tile)
-            if not outcome.ok:
-                if all_ok:
-                    failed_dir.mkdir(exist_ok=True)
-                _mirror(tile_path, failed_dir / tile_path.name)
+        _write_png(sample_path(out_dir, outcome.index), _to_uint8(outcome.after))
         if not outcome.ok:
             all_ok = False
-
-    contact_sheet = compose_contact_sheet([o.drilldown for o in outcomes])
-    _write_png(out_dir / "contact_sheet.png", contact_sheet)
 
     _write_json(
         out_dir / "invariant_log.json",
@@ -95,7 +87,7 @@ def write_gallery(
     _write_json(
         out_dir / "dataset_manifest.json",
         DatasetManifest(
-            source="synthetic",
+            source=source,
             sample_count=len(outcomes),
             samples=tuple(
                 DatasetSampleEntry(
@@ -127,17 +119,16 @@ def write_gallery(
     return all_ok
 
 
+def _to_uint8(sample: DenseSample) -> Tensor:
+    """Return the augmented RGB image as a uint8 ``[3, H, W]`` tensor."""
+    image = sample.image.as_subclass(torch.Tensor)
+    if image.dtype == torch.uint8:
+        return image
+    return image.clamp(0.0, 1.0).mul(255.0).to(torch.uint8)
+
+
 def _write_png(path: Path, tile: Tensor) -> None:
     write_png(tile, str(path))
-
-
-def _mirror(src: Path, dst: Path) -> None:
-    if dst.exists():
-        return
-    try:
-        os.link(src, dst)
-    except OSError:
-        shutil.copy2(src, dst)
 
 
 def _write_json(path: Path, model: BaseModel) -> None:

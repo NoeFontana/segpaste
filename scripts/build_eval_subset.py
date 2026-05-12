@@ -205,9 +205,9 @@ def _write_readme(
     panoptic_usage = (
         "\nOr the panoptic preset:\n\n"
         "```bash\n"
-        "uv run --group viewer --group eval python scripts/fiftyone_app.py \\\n"
+        "uv run --group visualize --group eval python scripts/visualize_preset.py \\\n"
         f"    --source coco --task panoptic --num-samples {num} \\\n"
-        "    --preset coco-panoptic\n"
+        "    --preset coco-panoptic --launch\n"
         "```\n"
         if with_panoptic
         else ""
@@ -225,7 +225,7 @@ size_categories:
 
 A {num}-image seeded subset of COCO val2017, used by
 [segpaste](https://github.com/NoeFontana/segpaste)'s
-`scripts/fiftyone_app.py --source coco` for visual evaluation of
+`scripts/visualize_preset.py --source coco` for visual evaluation of
 `BatchCopyPaste` presets.
 
 ## Provenance
@@ -257,8 +257,8 @@ ds = CocoDetectionV2(
 Or via the visual viewer (no manual download):
 
 ```bash
-uv run --group viewer --group eval python scripts/fiftyone_app.py \\
-    --source coco --num-samples {num} --preset <name>
+uv run --group visualize --group eval python scripts/visualize_preset.py \\
+    --source coco --num-samples {num} --preset <name> --launch
 ```
 {panoptic_usage}"""
     (out_dir / "README.md").write_text(body)

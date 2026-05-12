@@ -1,4 +1,4 @@
-"""Smoke test for `scripts/visualize_preset.py` (ADR-0009 §5)."""
+"""Smoke test for `scripts/visualize_preset.py` (ADR-0009 §5 / ADR-0013)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,10 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 import torch
+
+pytest.importorskip("fiftyone")
 
 from segpaste._internal.viz.manifest import (
     DatasetManifest,
@@ -56,11 +59,12 @@ def test_happy_path_renders_full_gallery_under_30s(tmp_path: Path) -> None:
     assert code == 0
     assert elapsed < WALL_CLOCK_BUDGET_S, f"viz took {elapsed:.2f}s (budget 30s)"
 
-    assert (out_dir / "contact_sheet.png").is_file()
+    assert not (out_dir / "contact_sheet.png").exists()
     samples_dir = out_dir / "samples"
     for i in range(NUM_SAMPLES):
-        for view in ("orig", "aug", "overlay"):
-            assert (samples_dir / f"{i:04d}_{view}.png").is_file()
+        assert (samples_dir / f"{i:04d}_aug.png").is_file()
+        assert not (samples_dir / f"{i:04d}_orig.png").exists()
+        assert not (samples_dir / f"{i:04d}_overlay.png").exists()
 
     log = InvariantLog.model_validate_json((out_dir / "invariant_log.json").read_text())
     assert len(log.samples) == NUM_SAMPLES
@@ -76,11 +80,10 @@ def test_happy_path_renders_full_gallery_under_30s(tmp_path: Path) -> None:
     assert run.seed == SEED
     assert run.num_samples == NUM_SAMPLES
 
-    failed_dir = out_dir / "_failed"
-    assert not failed_dir.exists() or not any(failed_dir.iterdir())
+    assert not (out_dir / "_failed").exists()
 
 
-def test_force_overlap_populates_failed_tree(tmp_path: Path) -> None:
+def test_force_overlap_marks_invariant_failure(tmp_path: Path) -> None:
     out_dir = tmp_path / "gallery"
     samples = make_synthetic_samples(seed=SEED, count=NUM_SAMPLES)
     outcomes = run_preset(
@@ -105,8 +108,10 @@ def test_force_overlap_populates_failed_tree(tmp_path: Path) -> None:
         seed=SEED,
         batch_size=NUM_SAMPLES,
         device="cpu",
+        source="synthetic",
     )
     assert not all_ok
-    failed_dir = out_dir / "_failed"
-    assert failed_dir.is_dir()
-    assert any(failed_dir.iterdir())
+    assert not (out_dir / "_failed").exists()
+
+    log = InvariantLog.model_validate_json((out_dir / "invariant_log.json").read_text())
+    assert any(not r.ok for s in log.samples for r in s.reports)

@@ -93,18 +93,18 @@ def build_dataset(
 ) -> fo.Dataset:
     """Return a FO ``Dataset`` keyed by ``sample_index``.
 
-    The ``aug`` drilldown tile (raw augmented image) is the primary
-    ``filepath``; instance masks/boxes are attached to the FO sample as
-    a native ``detections`` field so FiftyOne renders the overlay through
-    its UI rather than baking pixels. ``orig`` and ``overlay`` (diff)
-    paths are exposed as ``original_filepath`` / ``overlay_filepath``,
-    and the pre-augmentation instance fields are mirrored as
-    ``original_detections``. Panoptic samples additionally carry a
-    ``stuff_segmentation`` (and ``original_stuff_segmentation``) keyed
-    by category id with thing pixels zeroed. Per-sample invariant
-    outcomes and paste stats are populated as filterable fields.
-    *info* is assigned to ``dataset.info`` verbatim; persistence
-    (``dataset.save()``) is the caller's job.
+    The augmented image (raw RGB) is the FO Sample's ``filepath``;
+    instance masks/boxes are attached as native ``detections`` so
+    FiftyOne renders the overlay through its UI rather than baking
+    pixels. Pre-augmentation instance fields are mirrored as
+    ``original_detections`` — no separate ``orig`` / ``overlay`` PNG is
+    written (FO renders the diff natively from the two detection
+    layers). Panoptic samples additionally carry a ``stuff_segmentation``
+    (and ``original_stuff_segmentation``) keyed by category id with
+    thing pixels zeroed. Per-sample invariant outcomes and paste stats
+    are populated as filterable fields. *info* is assigned to
+    ``dataset.info`` verbatim; persistence (``dataset.save()``) is the
+    caller's job.
     """
     fo = require_fiftyone()
 
@@ -113,9 +113,7 @@ def build_dataset(
     fo_samples: list[Any] = []
     for outcome in outcomes:
         kwargs: dict[str, Any] = {
-            "filepath": str(sample_path(out_dir, outcome.index, "aug")),
-            "original_filepath": str(sample_path(out_dir, outcome.index, "orig")),
-            "overlay_filepath": str(sample_path(out_dir, outcome.index, "overlay")),
+            "filepath": str(sample_path(out_dir, outcome.index)),
             "sample_index": outcome.index,
             "invariant_passed": outcome.ok,
             "failed_checks": [r.name for r in outcome.reports if not r.ok],
