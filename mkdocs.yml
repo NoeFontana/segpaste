@@ -71,3 +71,6 @@ nav:
       - ADR-0008 Batch Copy-Paste (GPU): adrs/0008-batch-copy-paste.md
       - ADR-0009 Visual Validation and Presets: adrs/0009-visual-validation-and-presets.md
       - ADR-0010 Patch-Aligned Paste: adrs/0010-patch-aligned-paste.md
+      - ADR-0011 InstanceBank + SourceStrategy: adrs/0011-instance-bank.md
+      - ADR-0012 Torch-Native Image Harmonization: adrs/0012-image-harmonization.md
+      - ADR-0013 FiftyOne Visualizer Substrate: adrs/0013-fiftyone-visualizer-substrate.md

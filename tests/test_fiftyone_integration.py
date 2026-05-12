@@ -36,6 +36,7 @@ def test_build_dataset_populates_documented_fields(tmp_path: Path) -> None:
         seed=SEED,
         batch_size=NUM_SAMPLES,
         device="cpu",
+        source="synthetic",
     )
 
     dataset = build_dataset(
@@ -56,8 +57,6 @@ def test_build_dataset_populates_documented_fields(tmp_path: Path) -> None:
         seen_indices: set[int] = set()
         for fo_sample in dataset:
             assert Path(fo_sample.filepath).is_file()
-            assert Path(fo_sample.original_filepath).is_file()
-            assert Path(fo_sample.overlay_filepath).is_file()
             assert isinstance(fo_sample.invariant_passed, bool)
             assert fo_sample.invariant_passed is True
             assert isinstance(fo_sample.failed_checks, list)
@@ -102,6 +101,7 @@ def test_failed_checks_lists_failed_invariant_names(tmp_path: Path) -> None:
         seed=SEED,
         batch_size=NUM_SAMPLES,
         device="cpu",
+        source="synthetic",
     )
 
     dataset = build_dataset(

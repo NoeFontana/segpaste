@@ -255,6 +255,12 @@ shipped here:
 - Any real-data CI artifact. A future ADR-0010 would have to make a
   fresh case for that; this ADR rules it out at the framework level.
 
+**Note (A4 amendment, 2026-05-12).** Superseded by [ADR-0013](0013-fiftyone-visualizer-substrate.md):
+FiftyOne is the visualizer substrate at P2, behind the `[visualize]`
+extra. `scripts/visualize_preset.py` builds a `fo.Dataset` and emits
+flattened JSONs; the per-sample `orig`/`overlay` PNGs, `contact_sheet.png`,
+and `_failed/` mirror are removed.
+
 ## Consequences
 
 - **Public surface delta.** `segpaste.__all__` gains `register_preset`,

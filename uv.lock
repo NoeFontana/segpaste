@@ -3107,9 +3107,6 @@ bank-webdataset = [
 bench = [
     { name = "numpy" },
 ]
-coco = [
-    { name = "fiftyone" },
-]
 dev = [
     { name = "hypothesis" },
     { name = "pyright" },
@@ -3126,7 +3123,7 @@ eval = [
     { name = "huggingface-hub" },
     { name = "tqdm" },
 ]
-viewer = [
+visualize = [
     { name = "fiftyone" },
 ]
 
@@ -3146,7 +3143,7 @@ bank-webdataset = [
     { name = "webdataset", specifier = ">=0.2.86" },
 ]
 bench = [{ name = "numpy", specifier = ">=1.26" }]
-coco = [{ name = "fiftyone", specifier = ">=1.8.0" }]
+coco = []
 dev = [
     { name = "hypothesis", specifier = ">=6.150.0" },
     { name = "pyright", specifier = ">=1.1.380" },
@@ -3164,7 +3161,7 @@ eval = [
     { name = "huggingface-hub", specifier = ">=0.27" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
-viewer = [{ name = "fiftyone", specifier = ">=1.14.2" }]
+visualize = [{ name = "fiftyone", specifier = ">=1.14.2" }]
 
 [[package]]
 name = "setuptools"

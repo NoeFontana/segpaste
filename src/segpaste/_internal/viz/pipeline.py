@@ -1,6 +1,7 @@
 """Pipeline that runs a `BatchCopyPasteConfig` against a sample list.
 
-Orchestrates: stack → pad → forward → unpad → invariants → drilldown.
+Orchestrates: stack → pad → forward → unpad → invariants.
+
 The `force_overlap` kwarg is an internal-only test hook (no CLI surface)
 that injects same-class instance overlap into the post-aug sample so
 the failure path can be exercised end-to-end without an actual bug
@@ -17,7 +18,6 @@ from torch import Tensor
 
 from segpaste._internal.invariants._report import InvariantReport
 from segpaste._internal.viz.invariant_runner import run_invariants
-from segpaste._internal.viz.overlay import render_drilldown
 from segpaste.augmentation.batch_copy_paste import (
     BatchCopyPaste,
     BatchCopyPasteConfig,
@@ -37,7 +37,6 @@ class SampleOutcome:
     before: DenseSample
     after: DenseSample
     reports: tuple[InvariantReport, ...]
-    drilldown: dict[str, Tensor]
 
     @property
     def ok(self) -> bool:
@@ -81,14 +80,12 @@ def run_preset(
         before_cpu = _move_sample(before, torch.device("cpu"))
         after_cpu = _move_sample(after, torch.device("cpu"))
         reports = run_invariants(before_cpu, after_cpu)
-        drilldown = render_drilldown(before_cpu, after_cpu)
         outcomes.append(
             SampleOutcome(
                 index=i,
                 before=before_cpu,
                 after=after_cpu,
                 reports=tuple(reports),
-                drilldown=drilldown,
             )
         )
     return outcomes

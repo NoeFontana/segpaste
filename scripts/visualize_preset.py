@@ -1,9 +1,12 @@
-"""Local visualization renderer for `BatchCopyPaste` (ADR-0009 §5).
+"""Local visualization renderer for ``BatchCopyPaste`` (ADR-0009 §5, ADR-0013).
 
-Runs a preset's :class:`BatchCopyPasteConfig` over a sample source, renders
-per-sample drilldowns + a contact sheet, and emits structured JSON for paste
-into a PR body. Any invariant violation populates ``_failed/`` and exits
-non-zero.
+Runs a preset's :class:`BatchCopyPasteConfig` over a sample source, writes
+one ``aug.png`` per sample plus the three JSON artifacts that ADR-0009 §5
+mandates for paste-into-PR-body, and materializes a FiftyOne ``Dataset``
+keyed by ``sample_index`` so the augmented composites are inspectable
+per-modality. ``--launch`` opens the FO App; ``--persist NAME`` flips
+``dataset.persistent=True`` for cross-session compare (default ephemeral,
+per ADR-0013 §4). Any invariant violation exits non-zero.
 """
 
 from __future__ import annotations
@@ -14,14 +17,20 @@ from pathlib import Path
 
 import torch
 
+from segpaste._internal.imports import require_fiftyone
+from segpaste._internal.viz.fiftyone_export import build_dataset
 from segpaste._internal.viz.pipeline import run_preset_batched
 from segpaste._internal.viz.synthetic import make_synthetic_samples
 from segpaste._internal.viz.writer import write_gallery
 from segpaste.augmentation.batch_copy_paste import BatchCopyPasteConfig
 from segpaste.presets import get_preset
+from segpaste.types import DenseSample
 
 _DEFAULT_SEED = 0xC0FFEE
 _DEFAULT_PRESET_LABEL = "default"
+_DEFAULT_PORT = 5151
+_DEFAULT_COCO_HF_REPO = "NoeFontana/segpaste-eval-data"
+_DEFAULT_COCO_IMAGE_SIZE = 512
 
 
 def _resolve_config(preset: str | None) -> tuple[str, BatchCopyPasteConfig]:
@@ -37,6 +46,12 @@ def _resolve_out_dir(out_dir: Path | None, preset_label: str) -> Path:
     return Path("local_gallery") / preset_label
 
 
+def _resolve_source_label(source: str, task: str) -> str:
+    if source == "synthetic":
+        return "synthetic"
+    return f"coco-{task}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -47,15 +62,65 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--source",
-        choices=["synthetic"],
+        choices=["synthetic", "coco"],
         default="synthetic",
-        help="Sample source.",
+        help="Sample source. 'coco' pulls a seeded COCO val2017 subset.",
+    )
+    parser.add_argument(
+        "--task",
+        choices=["detection", "panoptic"],
+        default="detection",
+        help=(
+            "COCO task. 'detection' loads instance annotations; 'panoptic' "
+            "loads panoptic_*.json + panoptic PNGs. Ignored for synthetic."
+        ),
     )
     parser.add_argument("--num-samples", type=int, default=8)
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
     parser.add_argument("--out-dir", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument(
+        "--coco-hf-repo",
+        type=str,
+        default=_DEFAULT_COCO_HF_REPO,
+        help="HF dataset repo for --source coco. Ignored when --coco-local is set.",
+    )
+    parser.add_argument(
+        "--coco-local",
+        type=Path,
+        default=None,
+        help="Local directory holding images/ + the COCO JSON. Skips HF download.",
+    )
+    parser.add_argument(
+        "--coco-image-size",
+        type=int,
+        default=_DEFAULT_COCO_IMAGE_SIZE,
+        help="LSJ output size (square) for COCO samples.",
+    )
+    parser.add_argument(
+        "--launch",
+        action="store_true",
+        help="Open the FiftyOne app on the built dataset (default: off).",
+    )
+    parser.add_argument("--port", type=int, default=_DEFAULT_PORT)
+    naming = parser.add_mutually_exclusive_group()
+    naming.add_argument(
+        "--dataset-name",
+        type=str,
+        default=None,
+        help="FO Dataset name (ephemeral). Default: segpaste-<preset>-<seed:08x>.",
+    )
+    naming.add_argument(
+        "--persist",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help=(
+            "Persist the FO Dataset under NAME (sets dataset.persistent=True). "
+            "Use to compare runs across sessions; default is ephemeral."
+        ),
+    )
     args = parser.parse_args(argv)
 
     preset_label, config = _resolve_config(args.preset)
@@ -71,7 +136,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"--batch-size must be positive, got {args.batch_size}", file=sys.stderr)
         return 2
 
-    samples = make_synthetic_samples(seed=args.seed, count=args.num_samples)
+    samples: list[DenseSample]
+    if args.source == "coco":
+        from segpaste._internal.viz.coco_source import (
+            load_coco_panoptic_samples,
+            load_coco_samples,
+            resolve_coco_dir,
+        )
+
+        coco_dir = resolve_coco_dir(
+            hf_repo=None if args.coco_local else args.coco_hf_repo,
+            local=args.coco_local,
+        )
+        loader = (
+            load_coco_panoptic_samples if args.task == "panoptic" else load_coco_samples
+        )
+        samples = loader(
+            coco_dir,
+            count=args.num_samples,
+            image_size=args.coco_image_size,
+            seed=args.seed,
+        )
+    else:
+        samples = make_synthetic_samples(seed=args.seed, count=args.num_samples)
+
     outcomes = run_preset_batched(
         config,
         samples,
@@ -80,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         device=device,
     )
 
+    source_label = _resolve_source_label(args.source, args.task)
     all_ok = write_gallery(
         out_dir,
         outcomes,
@@ -87,11 +176,31 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         batch_size=args.batch_size,
         device=str(device),
+        source=source_label,
     )
+
+    dataset_name = (
+        args.persist or args.dataset_name or f"segpaste-{preset_label}-{args.seed:08x}"
+    )
+    dataset = build_dataset(
+        out_dir=out_dir,
+        outcomes=outcomes,
+        name=dataset_name,
+        info={"preset": preset_label, "seed": args.seed, "source": source_label},
+    )
+
+    if args.persist is not None:
+        dataset.persistent = True
+        dataset.save()
+
+    if args.launch:
+        fo = require_fiftyone()
+        session = fo.launch_app(dataset, remote=True, port=args.port)
+        session.wait(-1)
 
     if not all_ok:
         print(
-            f"visualize_preset: invariant violations under {out_dir}/_failed",
+            f"visualize_preset: invariant violations under {out_dir}",
             file=sys.stderr,
         )
         return 1
