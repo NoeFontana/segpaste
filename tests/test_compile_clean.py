@@ -14,6 +14,7 @@ from scripts.compile_explain import (
 )
 from segpaste import BatchCopyPaste
 from segpaste._internal.gpu.batched_placement import BatchedPlacementConfig
+from segpaste._internal.gpu.harmonize import HarmonizeConfig
 from segpaste.augmentation.batch_copy_paste import BatchCopyPasteConfig
 
 pytest.importorskip("torch._dynamo")
@@ -73,4 +74,35 @@ def test_patch_aligned_paste_has_no_disallowed_breaks(image_size: int) -> None:
         f"{len(disallowed)} graph-break reason(s) outside "
         f"{ALLOWLIST_PATH.name} with patch_aligned_paste=True "
         f"(image_size={image_size}): {disallowed}"
+    )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("reinhard", id="reinhard"),
+        pytest.param("multiband", id="multiband"),
+        pytest.param("poisson", id="poisson"),
+    ],
+)
+def test_harmonize_modes_have_no_disallowed_breaks(mode: str) -> None:
+    """Re-verify compile-clean with each harmonize mode at ``prob=1.0`` (ADR-0012).
+
+    Forces the harmonize branch (vs. the ``prob=0`` identity fast path) so
+    each mode's tensor ops are traced. Allow-list stays empty.
+    """
+    padded = build_fixture()
+    module = BatchCopyPaste(
+        BatchCopyPasteConfig(
+            harmonize=HarmonizeConfig(mode=mode, prob=1.0),  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    reasons = explain_breaks(module, padded)
+    allowlist = load_allowlist(ALLOWLIST_PATH)
+    _allowed, disallowed = partition(reasons, allowlist)
+
+    assert not disallowed, (
+        f"{len(disallowed)} graph-break reason(s) outside "
+        f"{ALLOWLIST_PATH.name} with harmonize.mode={mode!r}: {disallowed}"
     )
