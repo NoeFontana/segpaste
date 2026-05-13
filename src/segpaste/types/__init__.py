@@ -4,6 +4,7 @@ This module contains all data structures and configuration types used
 throughout the package.
 """
 
+from segpaste.types.audit import BatchAuditPacket
 from segpaste.types.batched_dense_sample import BatchedDenseSample
 from segpaste.types.data_structures import PaddingMask
 from segpaste.types.dense_sample import (
@@ -25,6 +26,7 @@ from segpaste.types.type_aliases import (
 )
 
 __all__ = [
+    "BatchAuditPacket",
     "BatchedDenseSample",
     "BoxesTensor",
     "CameraIntrinsics",

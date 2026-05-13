@@ -109,8 +109,8 @@ class TestSingleTileEqualsMultiTile:
 
         single = TileCompositor(TileCompositorConfig(tile_size=max(H, W)))
         tiled = TileCompositor(TileCompositorConfig(tile_size=16))
-        out_single = single(target, source, pm)
-        out_tiled = tiled(target, source, pm)
+        out_single, _ = single(target, source, pm)
+        out_tiled, _ = tiled(target, source, pm)
 
         assert torch.equal(
             out_single.images.as_subclass(torch.Tensor),
@@ -149,7 +149,7 @@ class TestWhereSemantics:
         source = _padded(b=2, k=3, seed_base=10)
         pm = _paste_mask(2)
         comp = TileCompositor()
-        out = comp(target, source, pm)
+        out, _ = comp(target, source, pm)
         out_t = out.images.as_subclass(torch.Tensor)
         tgt_t = target.images.as_subclass(torch.Tensor)
         src_t = source.images.as_subclass(torch.Tensor)
@@ -190,7 +190,7 @@ class TestZTestDepth:
             camera_intrinsics=source.camera_intrinsics,
         )
         pm = torch.ones(1, H, W, dtype=torch.bool)
-        out = TileCompositor()(target, source, pm)
+        out, _ = TileCompositor()(target, source, pm)
         assert torch.equal(
             out.images.as_subclass(torch.Tensor),
             target.images.as_subclass(torch.Tensor),
@@ -206,7 +206,7 @@ class TestSourcePaddingMask:
         src_pad[..., H // 2 :, W // 2 :] = True
         source_with_pad = replace(source, padding_mask=PaddingMask.from_tensor(src_pad))
         pm = torch.ones(1, H, W, dtype=torch.bool)
-        out = TileCompositor()(target, source_with_pad, pm)
+        out, _ = TileCompositor()(target, source_with_pad, pm)
         out_t = out.images.as_subclass(torch.Tensor)
         tgt_t = target.images.as_subclass(torch.Tensor)
         src_t = source.images.as_subclass(torch.Tensor)
@@ -224,8 +224,8 @@ class TestSourcePaddingMask:
         pm = _paste_mask(2)
         single = TileCompositor(TileCompositorConfig(tile_size=max(H, W)))
         tiled = TileCompositor(TileCompositorConfig(tile_size=16))
-        out_single = single(target, source_with_pad, pm)
-        out_tiled = tiled(target, source_with_pad, pm)
+        out_single, _ = single(target, source_with_pad, pm)
+        out_tiled, _ = tiled(target, source_with_pad, pm)
         assert torch.equal(
             out_single.images.as_subclass(torch.Tensor),
             out_tiled.images.as_subclass(torch.Tensor),
@@ -237,7 +237,7 @@ class TestSurvivorSubtraction:
         target = _padded(b=2, k=3, seed_base=0)
         source = _padded(b=2, k=3, seed_base=10)
         pm = _paste_mask(2)
-        out = TileCompositor()(target, source, pm)
+        out, _ = TileCompositor()(target, source, pm)
         assert out.instance_masks is not None
         assert target.instance_masks is not None
         m4 = pm.unsqueeze(1)

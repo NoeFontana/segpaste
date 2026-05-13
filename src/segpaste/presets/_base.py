@@ -33,6 +33,15 @@ class SignOff(_FrozenStrict):
     iso_date: str
     """ISO-8601 date string of the local run (UTC)."""
 
+    invariants_dispatched: int
+    """Distinct ADR-0001 §Part (ii) ``check_*`` predicates dispatched per
+    sample under the audited path (ADR-0014). Today's ceiling is 15 of 16 —
+    ``depth.metric_intrinsics_rescale`` is carved out (ADR-0014 §4)."""
+
+    invariants_passed: int
+    """Distinct dispatched predicates that returned ``ok=True`` across every
+    sample. ``invariants_passed <= invariants_dispatched``."""
+
 
 class PresetConfig(_FrozenStrict):
     """A registered dataset preset (ADR-0009 §3).

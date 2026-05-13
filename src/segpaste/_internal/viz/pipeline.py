@@ -69,17 +69,18 @@ def run_preset(
     generator = torch.Generator(device=device).manual_seed(seed)
 
     with torch.inference_mode():
-        after_padded = module.forward(padded, generator=generator)
+        after_padded, audit = module.forward_with_audit(padded, generator=generator)
     after_samples = BatchedDenseSample.from_padded(after_padded).to_samples()
 
     if force_overlap:
         after_samples = [_inject_same_class_overlap(s) for s in after_samples]
 
+    audit_cpu = audit.to(torch.device("cpu"))
     outcomes: list[SampleOutcome] = []
     for i, (before, after) in enumerate(zip(samples_dev, after_samples, strict=True)):
         before_cpu = _move_sample(before, torch.device("cpu"))
         after_cpu = _move_sample(after, torch.device("cpu"))
-        reports = run_invariants(before_cpu, after_cpu)
+        reports = run_invariants(before_cpu, after_cpu, audit=audit_cpu.select(i))
         outcomes.append(
             SampleOutcome(
                 index=i,

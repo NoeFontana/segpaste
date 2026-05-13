@@ -102,6 +102,8 @@ def test_signoff_round_trip() -> None:
         torch_version="2.8.0",
         sample_count=128,
         iso_date="2026-04-25",
+        invariants_dispatched=15,
+        invariants_passed=15,
     )
     cfg = PresetConfig(
         name="with-sign-off",

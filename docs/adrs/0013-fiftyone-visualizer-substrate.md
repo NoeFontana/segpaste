@@ -153,6 +153,20 @@ the 6 reachable checks that failed; passing those 6 is necessary but
 not sufficient for full ADR-0001 §Part-(ii) compliance, and the PR
 review ritual reflects that.
 
+**Closed by [ADR-0014](0014-batchauditpacket-forward-return-sidecar.md)**:
+the new `BatchCopyPaste.forward_with_audit` sibling method returns a
+`BatchAuditPacket` carrying the post-z-test paste union, warped source
+depth fields, source intrinsics, panoptic schema, and fractional area
+thresholds. `run_invariants` is widened to `(before, after, audit=None)`
+and the viz pipeline at `_internal/viz/pipeline.py:72` now calls
+`forward_with_audit`. Audited coverage is **15 of 16** §Part-(ii)
+invariants (`depth.metric_intrinsics_rescale` is carved out of the
+audit-path dispatch and pinned by `tests/test_invariants_internal.py`
+at the wrapper level — see ADR-0014 §4). The `count of 6 of 15` in the
+heading above is a pre-ADR-0014 baseline measurement; the canonical
+count in ADR-0001 §Part (ii) is 16 (5 instance + 4 panoptic + 2 semantic
++ 3 depth + 2 normals).
+
 ## Consequences
 
 - **Public surface unchanged.** `segpaste.__all__` is untouched;

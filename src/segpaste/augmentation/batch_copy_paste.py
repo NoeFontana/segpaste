@@ -52,7 +52,12 @@ from segpaste.augmentation.source_config import (
     SourceConfig,
     build_source_strategy,
 )
-from segpaste.types import PaddedBatchedDenseSample, PanopticSchemaSpec
+from segpaste.types import (
+    BatchAuditPacket,
+    PaddedBatchedDenseSample,
+    PanopticSchemaSpec,
+)
+from segpaste.types.audit import AuditThresholds
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
 
 
@@ -186,8 +191,52 @@ class BatchCopyPaste(nn.Module):
         padded: PaddedBatchedDenseSample,
         generator: torch.Generator | None = None,
     ) -> PaddedBatchedDenseSample:
+        out, _ = self._forward_impl(padded, generator)
+        return out
+
+    def forward_with_audit(
+        self,
+        padded: PaddedBatchedDenseSample,
+        generator: torch.Generator | None = None,
+    ) -> tuple[PaddedBatchedDenseSample, BatchAuditPacket]:
+        """Forward + sidecar audit packet (ADR-0014).
+
+        Intended for the offline visualizer / invariant-dispatch path. Returns
+        the same :class:`PaddedBatchedDenseSample` as :meth:`forward` plus a
+        :class:`BatchAuditPacket` carrying the post-z-test paste union, warped
+        source depth fields, source intrinsics, panoptic schema, and area
+        thresholds. **Not** traced by the compile-clean contract (ADR-0008
+        §D7); use :meth:`forward` for the training hot path.
+        """
+        return self._forward_impl(padded, generator)
+
+    def _forward_impl(
+        self,
+        padded: PaddedBatchedDenseSample,
+        generator: torch.Generator | None,
+    ) -> tuple[PaddedBatchedDenseSample, BatchAuditPacket]:
+        panoptic_cfg = self.config.panoptic
+        thresholds = AuditThresholds(
+            min_residual_area_frac=self.config.min_residual_area_frac,
+            tau_stuff_frac=(
+                panoptic_cfg.tau_stuff_frac if panoptic_cfg is not None else None
+            ),
+        )
+        panoptic_schema = panoptic_cfg.taxonomy if panoptic_cfg is not None else None
+
         if padded.batch_size == 0:
-            return padded
+            _, _, h, w = padded.images.shape
+            empty_audit = BatchAuditPacket(
+                paste_union=torch.zeros(
+                    (0, h, w), dtype=torch.bool, device=padded.images.device
+                ),
+                warped_source_depth=None,
+                warped_source_depth_valid=None,
+                source_intrinsics=None,
+                panoptic_schema=panoptic_schema,
+                thresholds=thresholds,
+            )
+            return padded, empty_audit
 
         if self.config.placement.pad_to_multiple is not None:
             padded = pad_canvas_to_multiple(
@@ -204,18 +253,27 @@ class BatchCopyPaste(nn.Module):
             source_eligible,
             generator,
         )
-        warped = self.propagator(padded, source_view, placement)
+        warped, warped_source = self.propagator(padded, source_view, placement)
         paste_mask = self._paste_mask(warped, placement)
         warped = self.harmonizer(padded, warped, paste_mask, generator)
-        composited = self.compositor(padded, warped, paste_mask)
-        if self.config.panoptic is not None:
-            composited, warped = self._revert_stuff_collapse(
-                padded, composited, warped, paste_mask
+        composited, paste_union = self.compositor(padded, warped, paste_mask)
+        if panoptic_cfg is not None:
+            composited, warped, paste_union = self._revert_stuff_collapse(
+                padded, composited, warped, paste_mask, paste_union
             )
         composited = drop_occluded_targets(
             padded, composited, self.config.min_residual_area_frac
         )
-        return self._merge_slots(composited, warped, placement)
+        out = self._merge_slots(composited, warped, placement)
+        audit = BatchAuditPacket(
+            paste_union=paste_union,
+            warped_source_depth=warped_source.warped_depth,
+            warped_source_depth_valid=warped_source.warped_depth_valid,
+            source_intrinsics=warped_source.source_intrinsics,
+            panoptic_schema=panoptic_schema,
+            thresholds=thresholds,
+        )
+        return out, audit
 
     def _source_eligible(self, padded: PaddedBatchedDenseSample) -> Tensor | None:
         if self.config.panoptic is None:
@@ -228,7 +286,8 @@ class BatchCopyPaste(nn.Module):
         composited: PaddedBatchedDenseSample,
         warped: PaddedBatchedDenseSample,
         paste_mask: Tensor,
-    ) -> tuple[PaddedBatchedDenseSample, PaddedBatchedDenseSample]:
+        paste_union: Tensor,
+    ) -> tuple[PaddedBatchedDenseSample, PaddedBatchedDenseSample, Tensor]:
         """Revert paste pixels where a pre-paste stuff class collapsed (ADR-0006 §3).
 
         Image, semantic, and panoptic modalities are reverted to ``padded`` on
@@ -237,6 +296,10 @@ class BatchCopyPaste(nn.Module):
         overwritten by paste. Target instance survivors are restored and
         warped paste masks cleared so the panoptic bijection on thing pixels
         still holds downstream.
+
+        ``paste_union`` is also adjusted: revert pixels are subtracted so the
+        audit packet's ``paste_union`` reflects the *post-revert* effective
+        paste region (consistent with ADR-0001 §(ii) instance subtraction).
         """
         panoptic = self.config.panoptic
         if (
@@ -245,7 +308,7 @@ class BatchCopyPaste(nn.Module):
             or composited.semantic_maps is None
             or self.stuff_classes.numel() == 0
         ):
-            return composited, warped
+            return composited, warped, paste_union
 
         b, h, w = paste_mask.shape
         device = paste_mask.device
@@ -305,7 +368,8 @@ class BatchCopyPaste(nn.Module):
             instance_masks=new_target_masks,
         )
         new_warped = replace(warped, instance_masks=new_warped_masks)
-        return new_composited, new_warped
+        new_paste_union = paste_union & ~revert
+        return new_composited, new_warped, new_paste_union
 
     @staticmethod
     def _valid_extent(padded: PaddedBatchedDenseSample) -> Tensor | None:

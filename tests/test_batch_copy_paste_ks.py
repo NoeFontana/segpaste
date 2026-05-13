@@ -87,7 +87,7 @@ def _collect_histograms(module: BatchCopyPaste) -> dict[str, torch.Tensor]:
         source_view, placement = module.source_strategy.sample(
             padded, valid_extent=None, source_eligible=None, generator=_seeded(i)
         )
-        warped = module.propagator(padded, source_view, placement)
+        warped, _ = module.propagator(padded, source_view, placement)
         paste_gate = placement.paste_valid.view(
             placement.paste_valid.shape[0], placement.paste_valid.shape[1], 1, 1
         )
