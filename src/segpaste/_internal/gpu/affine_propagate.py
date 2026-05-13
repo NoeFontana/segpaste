@@ -32,6 +32,8 @@ nearest-mode sampling does not flip bool boundaries on sub-pixel offsets.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import torch
 from torch import Tensor, nn
 from torch.nn.functional import grid_sample
@@ -41,6 +43,21 @@ from segpaste._internal.gpu.batched_placement import BatchedPlacement
 from segpaste.compile_util import skip_if_compiling
 from segpaste.types import PaddedBatchedDenseSample, PaddingMask
 from segpaste.types.dense_sample import PanopticMap, SemanticMap
+
+
+class WarpedSource(NamedTuple):
+    """Audit-only sidecar exposing pre-composite warped source fields.
+
+    Per ADR-0014 §3. Captures the warped source's depth / depth_valid and the
+    gathered source ``camera_intrinsics`` before :class:`TileCompositor` merges
+    them into the target. Every field is ``None`` when its modality is absent
+    on the source. Consumed by :class:`BatchAuditPacket` assembly in
+    :meth:`BatchCopyPaste._forward_impl`; not seen by the training hot path.
+    """
+
+    warped_depth: Tensor | None
+    warped_depth_valid: Tensor | None
+    source_intrinsics: Tensor | None
 
 
 @skip_if_compiling
@@ -196,7 +213,7 @@ class AffinePropagator(nn.Module):
         target: PaddedBatchedDenseSample,
         source: PaddedBatchedDenseSample,
         placement: BatchedPlacement,
-    ) -> PaddedBatchedDenseSample:
+    ) -> tuple[PaddedBatchedDenseSample, WarpedSource]:
         _validate_alignment(target, source)
         b = target.batch_size
         # ``k`` is the source view's K — the output carries one warped row
@@ -207,7 +224,7 @@ class AffinePropagator(nn.Module):
         _, _, h, w = target.images.shape
 
         if b == 0:
-            return target
+            return target, WarpedSource(None, None, None)
 
         grid = _build_grid(
             h,
@@ -313,7 +330,7 @@ class AffinePropagator(nn.Module):
             warped_iv = _warp_validity_gate(src_iv, grid)
             warped_padding_mask = PaddingMask.from_tensor(~warped_iv)
 
-        return PaddedBatchedDenseSample(
+        propagated = PaddedBatchedDenseSample(
             images=tv_tensors.Image(warped_images),
             boxes=warped_boxes,
             labels=warped_labels,
@@ -329,3 +346,9 @@ class AffinePropagator(nn.Module):
             padding_mask=warped_padding_mask,
             camera_intrinsics=warped_intrinsics,
         )
+        audit = WarpedSource(
+            warped_depth=warped_depth,
+            warped_depth_valid=warped_depth_valid,
+            source_intrinsics=warped_intrinsics,
+        )
+        return propagated, audit

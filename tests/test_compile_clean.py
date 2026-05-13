@@ -77,6 +77,33 @@ def test_patch_aligned_paste_has_no_disallowed_breaks(image_size: int) -> None:
     )
 
 
+def test_forward_with_audit_not_in_compile_clean_contract() -> None:
+    """ADR-0014 §7: ``forward_with_audit`` is offline-only.
+
+    The compile-clean allow-list at ``scripts/compile_allowlist.txt`` governs
+    :meth:`BatchCopyPaste.forward` exclusively (ADR-0008 §D7). The audit-
+    returning sibling method is not part of the contract — its return type
+    contains ``Tensor | None`` fields that ``fullgraph=True`` would reject
+    at the type-narrowing step. Pinning the empty allow-list here documents
+    that the audit path is intentionally not allowed to drift into the
+    training hot path.
+    """
+    contents = ALLOWLIST_PATH.read_text()
+    stripped_lines = [
+        line.strip()
+        for line in contents.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert stripped_lines == [], (
+        f"compile allow-list must stay empty (ADR-0008 §D7 + ADR-0014 §7); "
+        f"found entries: {stripped_lines}"
+    )
+    assert "forward_with_audit" not in contents, (
+        "forward_with_audit must NOT be in the compile allow-list; "
+        "ADR-0014 §7 requires the audit path to stay offline-only."
+    )
+
+
 @pytest.mark.parametrize(
     "mode",
     [

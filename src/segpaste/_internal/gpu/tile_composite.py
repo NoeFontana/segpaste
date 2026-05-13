@@ -79,7 +79,14 @@ class TileCompositor(nn.Module):
         target: PaddedBatchedDenseSample,
         source: PaddedBatchedDenseSample,
         paste_mask: Tensor,
-    ) -> PaddedBatchedDenseSample:
+    ) -> tuple[PaddedBatchedDenseSample, Tensor]:
+        """Composite ``source`` onto ``target`` and return ``(out, paste_union)``.
+
+        The second tuple element is the OR-reduce over per-tile ``m_eff`` —
+        i.e. ``M_eff`` across the full batch frame, post-z-test. Per ADR-0014
+        §3 this is the audit-only ``paste_union`` consumed by audit-using
+        invariant predicates; it is unused on the training hot path.
+        """
         if paste_mask.dtype != torch.bool:
             raise ValueError("paste_mask must be bool")
         tgt_imgs = target.images
@@ -119,6 +126,10 @@ class TileCompositor(nn.Module):
             else None
         )
 
+        # OR-reduce over per-tile ``m_eff`` so audit dispatch can verify
+        # ADR-0001 §(ii) invariants against the effective paste union.
+        paste_union = torch.zeros((b, h, w), dtype=torch.bool, device=tgt_imgs.device)
+
         ts = self.config.tile_size
         for y0 in range(0, h, ts):
             y1 = min(y0 + ts, h)
@@ -146,6 +157,7 @@ class TileCompositor(nn.Module):
                     else None
                 )
                 m_eff = _effective_mask(paste_tile, tgt_d, tgt_dv, src_d, siv_tile)
+                paste_union[:, y0:y1, x0:x1] = m_eff
                 m3 = m_eff.unsqueeze(1)
 
                 out_image[:, :, y0:y1, x0:x1] = torch.where(
@@ -193,7 +205,7 @@ class TileCompositor(nn.Module):
                         out_target_masks[:, :, y0:y1, x0:x1] & ~m3
                     )
 
-        return PaddedBatchedDenseSample(
+        composited = PaddedBatchedDenseSample(
             images=tv_tensors.Image(out_image),
             boxes=target.boxes,
             labels=target.labels,
@@ -213,3 +225,4 @@ class TileCompositor(nn.Module):
             padding_mask=target.padding_mask,
             camera_intrinsics=target.camera_intrinsics,
         )
+        return composited, paste_union

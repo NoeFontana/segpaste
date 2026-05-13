@@ -17,6 +17,7 @@ import segpaste
 # ADR update; see ADR-0001 Part (i) and ADR-0003.
 _EXPECTED_PUBLIC_API: tuple[str, ...] = (
     "BankSource",
+    "BatchAuditPacket",
     "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",

@@ -74,3 +74,4 @@ nav:
       - ADR-0011 InstanceBank + SourceStrategy: adrs/0011-instance-bank.md
       - ADR-0012 Torch-Native Image Harmonization: adrs/0012-image-harmonization.md
       - ADR-0013 FiftyOne Visualizer Substrate: adrs/0013-fiftyone-visualizer-substrate.md
+      - ADR-0014 BatchAuditPacket Forward-Return Sidecar: adrs/0014-batchauditpacket-forward-return-sidecar.md

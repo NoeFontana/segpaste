@@ -66,10 +66,10 @@ def check_depth_validity_join(
 ) -> InvariantReport:
     """Piecewise validity join (ADR-0001 §(ii), ADR-0007 §5).
 
-    Inside the translated paste mask, ``V_out = V_src ∧ V_tgt``; outside,
-    ``V_out = V_tgt``. ``paste_mask`` is the footprint the source was
-    pasted into (pre-z-test) — the composite is still target-dominant
-    outside that footprint.
+    Inside the effective paste mask ``M_eff`` (post-z-test paste union),
+    ``V_out = V_src ∧ V_tgt``; outside, ``V_out = V_tgt``. ``paste_mask``
+    is therefore the post-z-test paste union — the composite leaves the
+    target's validity untouched on pixels the z-test rejected.
     """
     name = "depth.validity_join"
     v_src = _depth_valid(before_src, "before_src")

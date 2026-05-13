@@ -24,6 +24,7 @@ from segpaste.augmentation import (
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
 from segpaste.presets import PresetConfig, get_preset, list_presets, register_preset
 from segpaste.types import (
+    BatchAuditPacket,
     BatchedDenseSample,
     CameraIntrinsics,
     DenseSample,
@@ -40,6 +41,7 @@ __version__: str = _pkg_version("segpaste")
 
 __all__ = [
     "BankSource",
+    "BatchAuditPacket",
     "BatchCopyPaste",
     "BatchedDenseSample",
     "CameraIntrinsics",
