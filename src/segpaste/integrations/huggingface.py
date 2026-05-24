@@ -1,4 +1,4 @@
-"""HuggingFace Mask2Former interop — ADR-0006 §6.
+"""HuggingFace Mask2Former interop — ADR-0006 §6, ADR-0015 §1.
 
 Pure-torch encoder/decoder for the ``{mask_labels, class_labels}`` dict
 shape consumed by :class:`transformers.Mask2FormerImageProcessor`. No
@@ -11,16 +11,21 @@ representation keeps ``panoptic_map`` as instance ids (ADR-0006 §1).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from typing import TypedDict
 
 import torch
 from torch import Tensor
 from torchvision import tv_tensors
 from torchvision.ops import masks_to_boxes
 
+from segpaste.augmentation.batch_copy_paste import BatchCopyPaste
+from segpaste.integrations.torchvision import make_segpaste_collate_fn
+from segpaste.presets import get_preset
 from segpaste.types import (
     DenseSample,
     InstanceMask,
+    PaddedBatchedDenseSample,
     PanopticMap,
     PanopticSchema,
     SemanticMap,
@@ -95,3 +100,72 @@ def from_hf_format(hf: Mapping[str, Tensor], schema: PanopticSchema) -> DenseSam
         semantic_map=SemanticMap(semantic),
         panoptic_map=PanopticMap(panoptic),
     )
+
+
+class HFBatch(TypedDict):
+    """Shape emitted by :func:`to_hf_batch` and :func:`make_hf_collate_fn`."""
+
+    mask_labels: list[Tensor]
+    class_labels: list[Tensor]
+    pixel_values: Tensor
+
+
+HFCollateFn = Callable[[list[DenseSample]], HFBatch]
+
+
+def to_hf_batch(padded: PaddedBatchedDenseSample) -> HFBatch:
+    """Emit per-sample ``mask_labels`` / ``class_labels`` plus stacked images.
+
+    Output shape:
+
+    * ``mask_labels``: ``list[Tensor]`` of ``[n_i, H, W]`` bool, one per
+      sample. Per-sample length follows ``padded.instance_valid``.
+    * ``class_labels``: ``list[Tensor]`` of ``[n_i]`` int64, aligned with
+      ``mask_labels``.
+    * ``pixel_values``: ``Tensor[B, C, H, W]`` float32.
+
+    Matches the training-time forward signature of
+    ``Mask2FormerForUniversalSegmentation`` and the output of
+    ``Mask2FormerImageProcessor.encode_inputs``.
+    """
+    if padded.instance_masks is None:
+        raise ValueError("to_hf_batch requires instance_masks on the padded batch")
+    images = padded.images.as_subclass(Tensor).to(torch.float32)
+    masks_per_sample: list[Tensor] = []
+    labels_per_sample: list[Tensor] = []
+    for i in range(padded.images.size(0)):
+        valid_i = padded.instance_valid[i]
+        masks_per_sample.append(padded.instance_masks[i][valid_i].to(torch.bool))
+        labels_per_sample.append(padded.labels[i][valid_i].to(torch.int64))
+    return HFBatch(
+        mask_labels=masks_per_sample,
+        class_labels=labels_per_sample,
+        pixel_values=images,
+    )
+
+
+def make_hf_collate_fn(preset_name: str, max_instances: int = 32) -> HFCollateFn:
+    """Return a ``collate_fn`` closing the loop into the Mask2Former dict shape.
+
+    Pipeline per batch:
+
+    1. :meth:`BatchedDenseSample.from_samples` (ragged collate)
+    2. :meth:`BatchedDenseSample.to_padded` (K-padded tensors)
+    3. :class:`BatchCopyPaste` augmentation (preset-bound)
+    4. :func:`to_hf_batch` (HF dict shape)
+
+    The :class:`BatchCopyPaste` instance is constructed eagerly at factory
+    call time and captured by the returned closure. With
+    ``num_workers > 0`` the kernel runs on CPU inside worker processes;
+    callers wanting GPU augmentation should perform steps 1-2 manually,
+    move the padded batch to device, and then call
+    :class:`BatchCopyPaste` + :func:`to_hf_batch`.
+    """
+    preset = get_preset(preset_name)
+    augment = BatchCopyPaste(preset.batch_copy_paste)
+    collate_padded = make_segpaste_collate_fn(max_instances)
+
+    def _collate(samples: list[DenseSample]) -> HFBatch:
+        return to_hf_batch(augment(collate_padded(samples)))
+
+    return _collate

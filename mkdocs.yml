@@ -59,8 +59,15 @@ extra_javascript:
 
 nav:
   - Home: index.md
-  - API Reference: api.md
-  - ADRs:
+  - Getting started: getting-started.md
+  - Migration guide: migration.md
+  - Design principles: design-principles.md
+  - Reference:
+      - Public API: reference/api.md
+      - Presets: reference/presets.md
+      - Integrations: reference/integrations.md
+  - Decision records:
+      - Overview: adrs/index.md
       - ADR-0001 Dense-Sample Composites: adrs/0001-dense-sample.md
       - ADR-0002 Performance Baseline: adrs/0002-performance-baseline.md
       - ADR-0003 Hard Deprecation Stance: adrs/0003-hard-deprecation-stance.md
@@ -75,3 +82,4 @@ nav:
       - ADR-0012 Torch-Native Image Harmonization: adrs/0012-image-harmonization.md
       - ADR-0013 FiftyOne Visualizer Substrate: adrs/0013-fiftyone-visualizer-substrate.md
       - ADR-0014 BatchAuditPacket Forward-Return Sidecar: adrs/0014-batchauditpacket-forward-return-sidecar.md
+      - ADR-0015 30-Minute Integration Story: adrs/0015-thirty-minute-integration.md
