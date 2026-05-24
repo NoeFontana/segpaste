@@ -88,10 +88,11 @@ Conventions:
 
 ### 2. Optional dependencies
 
-- **ADD** `[lightning]`: pinned `lightning>=2.2`. This is the canonical
+- **ADD** `[lightning]`: pinned `lightning>=2.6`. This is the canonical
   PyPI distribution name since the 2.0 rename of `pytorch-lightning`;
   it provides `lightning.pytorch.LightningDataModule`, which is the
-  import path the adapter uses.
+  import path the adapter uses. `2.6` is the latest stable as of the
+  ADR-acceptance date (2026-05-24).
 - **SKIP** `[huggingface]`: the HF adapter performs no runtime import
   of `transformers`. Listing the extra would mislead users into
   thinking it is required. The getting-started page documents the

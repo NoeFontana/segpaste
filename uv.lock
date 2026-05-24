@@ -3678,7 +3678,7 @@ eval = [
     { name = "huggingface-hub", specifier = ">=0.27" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
-lightning = [{ name = "lightning", specifier = ">=2.2" }]
+lightning = [{ name = "lightning", specifier = ">=2.6" }]
 visualize = [{ name = "fiftyone", specifier = ">=1.14.2" }]
 
 [[package]]

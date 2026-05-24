@@ -20,7 +20,7 @@ the current set with `segpaste.list_presets()`.
 
 ```bash
 pip install segpaste
-pip install transformers           # for the Mask2Former example below
+pip install 'transformers>=5.9'    # for the Mask2Former example below
 pip install 'segpaste[lightning]'  # only if you use the Lightning adapter
 ```
 

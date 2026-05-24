@@ -52,7 +52,7 @@ bank-webdataset = [
     "pyarrow>=15",
     "webdataset>=0.2.86",
 ]
-lightning = ["lightning>=2.2"]
+lightning = ["lightning>=2.6"]
 
 [project.urls]
 Homepage = "https://github.com/NoeFontana/segpaste"
