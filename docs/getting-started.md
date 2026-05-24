@@ -102,7 +102,7 @@ for samples in loader:
 
 ## Next
 
-- Switching from `torchvision.transforms.v2.SimpleCopyPaste` or
+- Switching from torchvision's reference `SimpleCopyPaste` or
   `mmdet.datasets.transforms.CopyPaste`? See the
   [migration guide](migration.md).
 - Why segpaste is preset-based and not transform-chained: see

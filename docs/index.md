@@ -11,8 +11,9 @@ preset-driven API.
 
 - **[Getting started](getting-started.md)** — install, look up a
   preset, run one training step against Hugging Face Mask2Former.
-- **[Migration guide](migration.md)** — swap in from
-  `torchvision.transforms.v2.SimpleCopyPaste` or
+- **[Migration guide](migration.md)** — swap in from torchvision's
+  reference `SimpleCopyPaste` (the
+  `references/detection/transforms.py` example) or
   `mmdet.datasets.transforms.CopyPaste`.
 - **[Design principles](design-principles.md)** — what segpaste is
   opinionated about, with pointers to the governing ADRs.

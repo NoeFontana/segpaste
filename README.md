@@ -25,7 +25,7 @@ for a runnable end-to-end example: install → registered preset →
 `BatchCopyPaste` → Hugging Face Mask2Former → one training step in under
 50 lines. The full docs site at
 <https://NoeFontana.github.io/segpaste> covers migration from
-`torchvision.SimpleCopyPaste` / `mmdet.CopyPaste`, design
+torchvision's reference `SimpleCopyPaste` / `mmdet.CopyPaste`, design
 principles, and the pinned public API.
 
 The public API is exposed in the `segpaste` namespace. It is subject to

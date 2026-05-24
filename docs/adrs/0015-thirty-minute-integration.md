@@ -20,7 +20,8 @@ Usage section (lines 21-54) demonstrates `BatchCopyPaste()` with defaults
 but no preset, no model, and no training step. `docs/index.md` is a one-
 line include of the README; `docs/api.md` is a single `::: segpaste`
 mkdocstrings directive. There is no migration page from the prior
-copy-paste implementations (`torchvision.transforms.v2.SimpleCopyPaste`,
+copy-paste implementations (the `SimpleCopyPaste` reference in
+torchvision's `references/detection/transforms.py` example,
 `mmdet.datasets.transforms.CopyPaste`); no Hugging Face Trainer recipe;
 no Lightning adapter.
 
@@ -126,9 +127,10 @@ Decision records (overview + ADR list). New pages:
   install → COCO panoptic dataset → preset → `BatchCopyPaste` → Hugging
   Face Mask2Former → one `loss.backward()` step. The reader supplies the
   COCO root path; no bundled fixtures.
-- `docs/migration.md` — two H2 sections (torchvision SimpleCopyPaste,
-  mmdet.CopyPaste). Each uses `pymdownx.tabbed` before/after blocks and
-  a `!!! warning "Semantic difference"` admonition flagging GPU-vs-CPU,
+- `docs/migration.md` — two H2 sections (torchvision's reference
+  `SimpleCopyPaste`, `mmdet.datasets.transforms.CopyPaste`). Each uses
+  `pymdownx.tabbed` before/after blocks and a
+  `!!! warning "Semantic difference"` admonition flagging GPU-vs-CPU,
   batched-vs-per-sample, and panoptic support.
 - `docs/design-principles.md` — five short sections (DenseSample as
   canonical container; hard delete posture; GPU-resident + compile-clean

@@ -7,23 +7,27 @@ shape. Expect the diffs to look surface-level different — they are. The
 underlying compute path is also different (post-collate, on-device,
 graph-clean).
 
-## From `torchvision.transforms.v2.SimpleCopyPaste`
+## From torchvision's `SimpleCopyPaste` (reference detection script)
+
+torchvision does not ship a `CopyPaste` transform in its public
+`torchvision.transforms.v2` namespace. The reference implementation
+lives in
+[`references/detection/transforms.py`](https://github.com/pytorch/vision/blob/main/references/detection/transforms.py)
+as `class SimpleCopyPaste(torch.nn.Module)` and is intended to be
+vendored into a user's training script. If you copied it in, here's
+how to swap to segpaste.
 
 === "Before"
 
     ```python
-    from torchvision.transforms import v2
+    # Vendored from torchvision/references/detection/transforms.py
+    from references.detection.transforms import SimpleCopyPaste
 
-    transform = v2.Compose([
-        v2.ToImage(),
-        v2.SimpleCopyPaste(
-            blending=True,
-            resize_interpolation=v2.InterpolationMode.BILINEAR,
-            antialias=True,
-        ),
-        v2.ToDtype(torch.float32, scale=True),
-    ])
-    loader = DataLoader(dataset, batch_size=8, collate_fn=transform)
+    copy_paste = SimpleCopyPaste(blending=True)
+
+    for images, targets in loader:        # collate_fn=copy_paste-style
+        images, targets = copy_paste(images, targets)
+        # images: list[Tensor[C, H, W]], targets: list[dict[str, Tensor]]
     ```
 
 === "After"
@@ -31,7 +35,6 @@ graph-clean).
     ```python
     from segpaste import (
         BatchCopyPaste,
-        BatchedDenseSample,
         get_preset,
         make_segpaste_collate_fn,
     )
@@ -45,13 +48,14 @@ graph-clean).
     ```
 
 !!! warning "Semantic difference"
-    `torchvision.SimpleCopyPaste` runs inside the `collate_fn` on CPU
-    and operates only on instance masks. segpaste's `BatchCopyPaste` is
-    an `nn.Module` that runs *after* collate, on whatever device the
-    batch is on, and is panoptic-aware (the `coco-panoptic` preset
-    activates thing-only sources and a stuff-area-threshold revert per
-    ADR-0006). The augmentation is also `torch.compile(fullgraph=True)`-
-    clean.
+    The reference `SimpleCopyPaste` is an `nn.Module` that consumes
+    `list[Tensor]` + `list[dict]` (the torchvision detection target
+    shape) and runs on CPU. segpaste's `BatchCopyPaste` consumes a
+    `PaddedBatchedDenseSample` (a leading-batch dataclass of tensors),
+    runs on whatever device the batch is on, is panoptic-aware (the
+    `coco-panoptic` preset activates thing-only sources and a
+    stuff-area-threshold revert per ADR-0006), and is
+    `torch.compile(fullgraph=True)`-clean.
 
 ## From `mmdet.datasets.transforms.CopyPaste`
 
