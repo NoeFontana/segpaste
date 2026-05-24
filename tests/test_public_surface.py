@@ -39,10 +39,16 @@ _EXPECTED_PUBLIC_API: tuple[str, ...] = (
     "SourceStrategy",
     "__version__",
     "create_coco_dataloader",
+    "from_hf_format",
     "get_preset",
     "list_presets",
+    "make_hf_collate_fn",
     "make_large_scale_jittering",
+    "make_segpaste_collate_fn",
+    "make_segpaste_datamodule",
     "register_preset",
+    "to_hf_batch",
+    "to_hf_format",
 )
 
 

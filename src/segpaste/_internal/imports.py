@@ -58,3 +58,16 @@ def require_pyarrow() -> ModuleType:
             "pyarrow is not installed. Install with `uv sync --group bank-webdataset`."
         ) from exc
     return pyarrow
+
+
+def require_lightning() -> ModuleType:
+    """Return ``lightning.pytorch`` or raise with an install hint."""
+    try:
+        # lightning is an optional extra; absent in the base wheel.
+        import lightning.pytorch  # pyright: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise ImportError(
+            "lightning is not installed. "
+            "Install with `pip install 'segpaste[lightning]'`."
+        ) from exc
+    return lightning.pytorch

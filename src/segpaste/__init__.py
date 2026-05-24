@@ -22,6 +22,14 @@ from segpaste.augmentation import (
     make_large_scale_jittering,
 )
 from segpaste.integrations import CocoDetectionV2, create_coco_dataloader
+from segpaste.integrations.huggingface import (
+    from_hf_format,
+    make_hf_collate_fn,
+    to_hf_batch,
+    to_hf_format,
+)
+from segpaste.integrations.lightning import make_segpaste_datamodule
+from segpaste.integrations.torchvision import make_segpaste_collate_fn
 from segpaste.presets import PresetConfig, get_preset, list_presets, register_preset
 from segpaste.types import (
     BatchAuditPacket,
@@ -63,8 +71,14 @@ __all__ = [
     "SourceStrategy",
     "__version__",
     "create_coco_dataloader",
+    "from_hf_format",
     "get_preset",
     "list_presets",
+    "make_hf_collate_fn",
     "make_large_scale_jittering",
+    "make_segpaste_collate_fn",
+    "make_segpaste_datamodule",
     "register_preset",
+    "to_hf_batch",
+    "to_hf_format",
 ]

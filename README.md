@@ -20,42 +20,16 @@ pip install -e .
 
 ## Usage
 
-### TorchVision Integration
+See the [getting-started guide](https://NoeFontana.github.io/segpaste/getting-started/)
+for a runnable end-to-end example: install → registered preset →
+`BatchCopyPaste` → Hugging Face Mask2Former → one training step in under
+50 lines. The full docs site at
+<https://NoeFontana.github.io/segpaste> covers migration from
+`torchvision.SimpleCopyPaste` / `mmdet.CopyPaste`, design
+principles, and the pinned public API.
 
-Convenience types and wrappers are provided to ease integration with `torchvision` datasets and transforms.
-
-- `PaddingMask`: A TVTensor representing a padding mask.
-- `CocoDetectionV2`: A CocoDetection dataset that presents an interface compatible with `torchvision.transforms.v2` and with support for padding masks.
-- `SanitizeBoundingBoxes`: A small wrapper around `torchvision.transforms.v2.SanitizeBoundingBoxes` that adds support for `PaddingMask`.
-
-### Batched augmentation
-
-`BatchCopyPaste` is the public entry point: an `nn.Module` that consumes a
-`PaddedBatchedDenseSample` and returns one. It is graph-compilable under
-`torch.compile(fullgraph=True)` and replaces the pre-v0.3.0 CPU collator
-plus all four modality-specific wrappers (instance, panoptic, depth-aware,
-classmix) with a single GPU-resident pipeline.
-
-```python
-import torch
-from torch.utils.data import DataLoader
-
-from segpaste import BatchCopyPaste, BatchedDenseSample
-
-augment = BatchCopyPaste()
-loader = DataLoader(dataset, batch_size=8, collate_fn=list)
-
-for samples in loader:
-    padded = BatchedDenseSample.from_samples(samples).to_padded(max_instances=32)
-    padded = augment(padded, generator=torch.Generator(device=padded.images.device))
-    # padded is a PaddedBatchedDenseSample ready to feed your model
-```
-
-Usage examples live alongside the test suite (`tests/test_batch_copy_paste_shape.py`).
-
-### Further
-
-The public API is exposed in the `segpaste` namespace. It is subject to breaking changes, without prior notice, until version 1.0.0.
+The public API is exposed in the `segpaste` namespace. It is subject to
+breaking changes, without prior notice, until version 1.0.0 (see ADR-0003).
 
 ## Development
 
