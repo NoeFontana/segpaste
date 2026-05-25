@@ -21,17 +21,31 @@ uv run python -m benchmarks.comparison.aggregate \
 A single workload (`B=2, 256², k=1..3`), all three implementations,
 ~10 seconds on a 2-core machine.
 
-## Run the default 3D sweep
+## Run the default CPU sweep
 
 ```bash
 uv run python -m benchmarks.comparison.sweep \
-  --device cpu --grid default --warmup 50 --iters 200 \
+  --device cpu --grid default --warmup 30 --iters 100 \
   --out throughput.json -v
 ```
 
-`{B=2, 8, 32} × {256², 512², 1024²} × {k_hi=5, 20}` = 18 workloads ×
-~3 implementations. Roughly 25–35 minutes on a 2-core laptop, faster
-on a fast desktop CPU.
+`{B=2, 8, 32} × {256², 512²} × {k_hi=5, 20}` = 12 workloads ×
+~3 implementations. Roughly 15-20 minutes on a fast desktop CPU.
+`1024²` is intentionally excluded from the CPU default — segpaste's
+compositor cost grows linearly with `H × W × B`, and a single
+`B=32, 1024², k=1..20` cell can take **hours** on CPU. Use the `full`
+grid via the GPU lane.
+
+## Run the full sweep (GPU)
+
+```bash
+uv run python -m benchmarks.comparison.sweep \
+  --device cuda --grid full --warmup 200 --iters 500 \
+  --out throughput-cuda.json -v
+```
+
+`{B=2, 8, 32} × {256², 512², 1024²} × {k_hi=5, 20}` = 18 workloads.
+On an A100 the full pass runs in single-digit minutes.
 
 ## Run mmdet (Python 3.12 only)
 
@@ -48,18 +62,11 @@ uv run --python 3.12 python -m benchmarks.comparison.sweep ...
 If mmdet is unavailable, the sweep emits `status: "skipped"` for
 that impl rather than failing.
 
-## GPU sweep
+## GPU notes
 
-The same harness drives CUDA:
-
-```bash
-uv run python -m benchmarks.comparison.sweep \
-  --device cuda --grid default --warmup 200 --iters 500 \
-  --out throughput-cuda.json -v
-```
-
-mmdet automatically reports `status: "skipped"` because its backend is
-NumPy/CPU only (`supports_device(cuda) -> False`).
+The same harness drives CUDA. mmdet auto-reports `status: "skipped"`
+on CUDA because its backend is NumPy/CPU only
+(`supports_device(cuda) -> False`).
 
 ## Acceptance for committed numbers
 

@@ -87,18 +87,36 @@ pipeline; the bench measures the augmentation kernel itself.
 
 ### 3. Workload sweep
 
-A 3D grid sweep, manual dispatch only:
+Two grids: a CPU-friendly `default` and a `full` 3D grid that assumes
+a GPU.
 
-| Axis        | Values            |
-| ----------- | ----------------- |
-| Batch size  | `{2, 8, 32}`      |
-| Image size  | `{256, 512, 1024}` (square)  |
-| `k_hi`      | `{5, 20}` (`k_lo = 1` throughout) |
+**`default` (CPU)** — 12 cells:
 
-= 18 workloads × 3 implementations = 54 cells per device. mmdet only
-runs on CPU; the CUDA dispatch skips it cleanly via
-`supports_device`. The anchor point `(B=8, 512², k=1..5)` is shared
-with ADR-0002 so a regression in `segpaste` shows up in both gates.
+| Axis        | Values         |
+| ----------- | -------------- |
+| Batch size  | `{2, 8, 32}`   |
+| Image size  | `{256, 512}`   |
+| `k_hi`      | `{5, 20}` (`k_lo = 1`) |
+
+**`full` (GPU)** — 18 cells:
+
+| Axis        | Values             |
+| ----------- | ------------------ |
+| Batch size  | `{2, 8, 32}`       |
+| Image size  | `{256, 512, 1024}` |
+| `k_hi`      | `{5, 20}`          |
+
+`1024²` is intentionally absent from the CPU default. Empirical
+measurement on an EPYC-Milan dev box (8 cores, `num_threads=1` pin)
+showed segpaste at `B=8, 1024², k=1..20` taking ~16 minutes per cell
+on CPU — the compositor cost scales linearly with `H × W × B`. The
+`B=32, 1024², k=1..20` cell projects to **hours** on CPU. 1024² is the
+GPU sweep's territory.
+
+The anchor point `(B=8, 512², k=1..5)` is present in `default` and
+shared with ADR-0002 so a regression in `segpaste` shows up in both
+gates. mmdet only runs on CPU; the CUDA dispatch skips it cleanly via
+`supports_device`.
 
 ### 4. Timer reuse
 

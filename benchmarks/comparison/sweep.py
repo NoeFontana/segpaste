@@ -49,7 +49,17 @@ class GridSpec:
 
 
 GRIDS: dict[str, GridSpec] = {
+    # CPU-friendly: 12 cells, ~15-20 min per run on a fast desktop. Excludes
+    # 1024^2 (CPU compositor cost grows linearly with HxWxB; 1024^2 is the
+    # GPU sweep's territory).
     "default": GridSpec(
+        batch_sizes=(2, 8, 32),
+        image_sizes=(256, 512),
+        k_his=(5, 20),
+    ),
+    # Full 3D grid; assumes a GPU. 18 cells. With CUDA at 1024^2 each cell
+    # is sub-second, so the full pass runs in a few minutes.
+    "full": GridSpec(
         batch_sizes=(2, 8, 32),
         image_sizes=(256, 512, 1024),
         k_his=(5, 20),
