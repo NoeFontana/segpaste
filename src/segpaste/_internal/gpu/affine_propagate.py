@@ -199,18 +199,10 @@ def _transform_boxes(
 class IdentityPropagator(nn.Module):
     """Affine-free propagator: gathers ``source.x[source_idx]`` (ADR-0018 §A1).
 
+    Bitwise-equivalent to :class:`AffinePropagator` at ``scale=1, hflip=False,
+    translate=0`` but skips ``grid_sample`` and the per-tile grid build.
     Bound by :class:`BatchCopyPaste.__init__` when
-    :attr:`BatchCopyPasteConfig.skip_affine` is set. Skips ``grid_sample``
-    entirely and instead picks each source modality at its native source-frame
-    coordinates. The placement's ``scale``, ``translate``, and ``hflip`` are
-    ignored; only ``source_idx`` and ``paste_valid`` participate.
-
-    Use case: feature-matched comparison against reference copy-paste
-    implementations (e.g., torchvision's ``SimpleCopyPaste``) that don't
-    apply per-instance affine. Output is bitwise-equivalent to
-    :class:`AffinePropagator` with ``scale=1``, ``hflip=False``, and
-    ``translate=0``; the runtime difference is the absence of
-    ``grid_sample`` and the per-tile grid construction.
+    :attr:`BatchCopyPasteConfig.skip_affine` is set.
     """
 
     def forward(
@@ -237,13 +229,15 @@ class IdentityPropagator(nn.Module):
         warped_ids: Tensor | None = (
             source.instance_ids[idx] if source.instance_ids is not None else None
         )
+        # Indexing a tv_tensors Mask subclass returns a bare Tensor; rewrap
+        # in the modality-specific subclass on the way out.
         warped_semantic: SemanticMap | None = (
-            SemanticMap(source.semantic_maps.as_subclass(Tensor)[idx])
+            SemanticMap(source.semantic_maps[idx])
             if source.semantic_maps is not None
             else None
         )
         warped_panoptic: PanopticMap | None = (
-            PanopticMap(source.panoptic_maps.as_subclass(Tensor)[idx])
+            PanopticMap(source.panoptic_maps[idx])
             if source.panoptic_maps is not None
             else None
         )
@@ -253,7 +247,7 @@ class IdentityPropagator(nn.Module):
         )
         warped_normals = source.normals[idx] if source.normals is not None else None
         warped_padding_mask: PaddingMask | None = (
-            PaddingMask.from_tensor(source.padding_mask.as_subclass(Tensor)[idx])
+            PaddingMask.from_tensor(source.padding_mask[idx])
             if source.padding_mask is not None
             else None
         )

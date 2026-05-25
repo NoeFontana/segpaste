@@ -116,12 +116,10 @@ class BatchCopyPasteConfig(BaseModel):
     leaves the augmentation panoptic-agnostic (default)."""
 
     skip_affine: bool = False
-    """When True, the propagator gathers source instances directly without
-    any spatial transform (scale, hflip, translate are all ignored). The
-    placement sampler still runs to produce ``source_idx`` and
-    ``paste_valid``; only the warp step is skipped. ADR-0018 §A1 — the
-    feature-matched comparison mode against reference copy-paste
-    implementations that don't apply per-instance affine."""
+    """Bind :class:`IdentityPropagator` for a grid-free gather (ADR-0018 §A1).
+    Placement still samples ``source_idx`` and ``paste_valid``; the affine
+    warp step is skipped. Used for feature-matched comparison against
+    reference copy-paste implementations."""
 
     source: SourceConfig = Field(default_factory=IntraBatchSourceConfig)
     """Source-selection strategy (ADR-0011). Default
