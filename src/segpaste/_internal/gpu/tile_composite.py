@@ -114,11 +114,6 @@ class TileCompositor(nn.Module):
         out_normals = (
             torch.empty_like(target.normals) if target.normals is not None else None
         )
-        # Survivor masks update reads from the prior value, so we must seed
-        # with target.instance_masks (clone) rather than empty_like.
-        out_target_masks = (
-            target.instance_masks.clone() if target.instance_masks is not None else None
-        )
 
         src_image_valid = (
             ~source.padding_mask.as_subclass(Tensor).squeeze(1)
@@ -127,7 +122,11 @@ class TileCompositor(nn.Module):
         )
 
         # OR-reduce over per-tile ``m_eff`` so audit dispatch can verify
-        # ADR-0001 §(ii) invariants against the effective paste union.
+        # ADR-0001 §(ii) invariants against the effective paste union. The
+        # survivor instance_masks update is derived once from paste_union
+        # after the loop (ADR-0017 Fix 2) - that's algebraically equivalent
+        # to per-tile AND-update with the m_eff for each tile, but avoids
+        # the [B, K, H, W] clone + per-tile read-modify-write.
         paste_union = torch.zeros((b, h, w), dtype=torch.bool, device=tgt_imgs.device)
 
         ts = self.config.tile_size
@@ -200,10 +199,15 @@ class TileCompositor(nn.Module):
                         source.normals[:, :, y0:y1, x0:x1],
                         target.normals[:, :, y0:y1, x0:x1],
                     )
-                if out_target_masks is not None:
-                    out_target_masks[:, :, y0:y1, x0:x1] = (
-                        out_target_masks[:, :, y0:y1, x0:x1] & ~m3
-                    )
+
+        # Single full-image survivor update; equivalent to the prior per-tile
+        # AND-with-~m3 chain because tiles partition (B, H, W) and
+        # paste_union[b, y, x] == OR_over_tiles(m_eff_tile[b, y, x]).
+        out_target_masks = (
+            target.instance_masks & ~paste_union.unsqueeze(1)
+            if target.instance_masks is not None
+            else None
+        )
 
         composited = PaddedBatchedDenseSample(
             images=tv_tensors.Image(out_image),
