@@ -44,6 +44,13 @@ dev = [
     "hypothesis>=6.150.0",
 ]
 bench = ["numpy>=1.26"]
+# mmdet is intentionally NOT a dependency-group: mmcv 2.x has no Python
+# 3.13 wheels and its source build fails on `pkg_resources` (uv's
+# universal lock resolves all groups across requires-python, so even an
+# opt-in group breaks the lock on 3.13 dev boxes). The bench-throughput
+# workflow installs mmdet via `uv pip install` on Python 3.12 instead.
+# Track upstream wheel availability at
+# https://pypi.org/project/mmcv/#files.
 bank-memmap = ["numpy>=1.26"]
 bank-lmdb = [
     "lmdb>=1.4",
@@ -175,6 +182,8 @@ show_missing = true
 
 [tool.pyright]
 include = ["src", "tests", "benchmarks"]
+# Vendored upstream code is held to upstream's strictness, not ours.
+exclude = ["benchmarks/comparison/_refs"]
 pythonVersion = "3.11"
 pythonPlatform = "Linux"
 typeCheckingMode = "strict"

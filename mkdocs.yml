@@ -83,3 +83,5 @@ nav:
       - ADR-0013 FiftyOne Visualizer Substrate: adrs/0013-fiftyone-visualizer-substrate.md
       - ADR-0014 BatchAuditPacket Forward-Return Sidecar: adrs/0014-batchauditpacket-forward-return-sidecar.md
       - ADR-0015 30-Minute Integration Story: adrs/0015-thirty-minute-integration.md
+      - ADR-0016 Throughput Comparison: adrs/0016-throughput-comparison.md
+      - ADR-0017 CPU Perf Parity: adrs/0017-cpu-perf-parity.md
