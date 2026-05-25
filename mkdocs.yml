@@ -85,3 +85,4 @@ nav:
       - ADR-0015 30-Minute Integration Story: adrs/0015-thirty-minute-integration.md
       - ADR-0016 Throughput Comparison: adrs/0016-throughput-comparison.md
       - ADR-0017 CPU Perf Parity: adrs/0017-cpu-perf-parity.md
+      - ADR-0018 Perf-Parity Optimizations: adrs/0018-perf-parity-optimizations.md

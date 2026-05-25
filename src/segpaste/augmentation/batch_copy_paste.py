@@ -38,7 +38,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 from torchvision import tv_tensors
 
-from segpaste._internal.gpu.affine_propagate import AffinePropagator
+from segpaste._internal.gpu.affine_propagate import (
+    AffinePropagator,
+    IdentityPropagator,
+)
 from segpaste._internal.gpu.batched_placement import (
     BatchedPlacement,
     BatchedPlacementConfig,
@@ -112,6 +115,14 @@ class BatchCopyPasteConfig(BaseModel):
     stuff-area-threshold post-composite revert (ADR-0006). ``None``
     leaves the augmentation panoptic-agnostic (default)."""
 
+    skip_affine: bool = False
+    """When True, the propagator gathers source instances directly without
+    any spatial transform (scale, hflip, translate are all ignored). The
+    placement sampler still runs to produce ``source_idx`` and
+    ``paste_valid``; only the warp step is skipped. ADR-0018 §A1 — the
+    feature-matched comparison mode against reference copy-paste
+    implementations that don't apply per-instance affine."""
+
     source: SourceConfig = Field(default_factory=IntraBatchSourceConfig)
     """Source-selection strategy (ADR-0011). Default
     :class:`IntraBatchSourceConfig` reproduces v0.3.0 intra-batch source
@@ -160,7 +171,9 @@ class BatchCopyPaste(nn.Module):
         self.source_strategy: SourceStrategy = source_strategy or build_source_strategy(
             self.config.source, self.config.placement
         )
-        self.propagator = AffinePropagator()
+        self.propagator: nn.Module = (
+            IdentityPropagator() if self.config.skip_affine else AffinePropagator()
+        )
         self.harmonizer = ImageHarmonizer(self.config.harmonize)
         self.compositor = TileCompositor(self.config.composite)
 

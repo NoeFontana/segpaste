@@ -196,6 +196,97 @@ def _transform_boxes(
     return torch.stack([out_x1, out_y1, out_x2, out_y2], dim=-1)
 
 
+class IdentityPropagator(nn.Module):
+    """Affine-free propagator: gathers ``source.x[source_idx]`` (ADR-0018 §A1).
+
+    Bound by :class:`BatchCopyPaste.__init__` when
+    :attr:`BatchCopyPasteConfig.skip_affine` is set. Skips ``grid_sample``
+    entirely and instead picks each source modality at its native source-frame
+    coordinates. The placement's ``scale``, ``translate``, and ``hflip`` are
+    ignored; only ``source_idx`` and ``paste_valid`` participate.
+
+    Use case: feature-matched comparison against reference copy-paste
+    implementations (e.g., torchvision's ``SimpleCopyPaste``) that don't
+    apply per-instance affine. Output is bitwise-equivalent to
+    :class:`AffinePropagator` with ``scale=1``, ``hflip=False``, and
+    ``translate=0``; the runtime difference is the absence of
+    ``grid_sample`` and the per-tile grid construction.
+    """
+
+    def forward(
+        self,
+        target: PaddedBatchedDenseSample,
+        source: PaddedBatchedDenseSample,
+        placement: BatchedPlacement,
+    ) -> tuple[PaddedBatchedDenseSample, WarpedSource]:
+        _validate_alignment(target, source)
+        b = target.batch_size
+        k = source.max_instances
+
+        if b == 0:
+            return target, WarpedSource(None, None, None)
+
+        idx = placement.source_idx
+        warped_images = source.images[idx]
+        warped_boxes = source.boxes[idx]
+        warped_labels = source.labels[idx]
+
+        warped_masks: Tensor | None = (
+            source.instance_masks[idx] if source.instance_masks is not None else None
+        )
+        warped_ids: Tensor | None = (
+            source.instance_ids[idx] if source.instance_ids is not None else None
+        )
+        warped_semantic: SemanticMap | None = (
+            SemanticMap(source.semantic_maps.as_subclass(Tensor)[idx])
+            if source.semantic_maps is not None
+            else None
+        )
+        warped_panoptic: PanopticMap | None = (
+            PanopticMap(source.panoptic_maps.as_subclass(Tensor)[idx])
+            if source.panoptic_maps is not None
+            else None
+        )
+        warped_depth = source.depth[idx] if source.depth is not None else None
+        warped_depth_valid = (
+            source.depth_valid[idx] if source.depth_valid is not None else None
+        )
+        warped_normals = source.normals[idx] if source.normals is not None else None
+        warped_padding_mask: PaddingMask | None = (
+            PaddingMask.from_tensor(source.padding_mask.as_subclass(Tensor)[idx])
+            if source.padding_mask is not None
+            else None
+        )
+        warped_intrinsics = (
+            source.camera_intrinsics[idx]
+            if source.camera_intrinsics is not None
+            else None
+        )
+
+        propagated = PaddedBatchedDenseSample(
+            images=tv_tensors.Image(warped_images),
+            boxes=warped_boxes,
+            labels=warped_labels,
+            instance_valid=placement.paste_valid,
+            max_instances=k,
+            instance_masks=warped_masks,
+            instance_ids=warped_ids,
+            semantic_maps=warped_semantic,
+            panoptic_maps=warped_panoptic,
+            depth=warped_depth,
+            depth_valid=warped_depth_valid,
+            normals=warped_normals,
+            padding_mask=warped_padding_mask,
+            camera_intrinsics=warped_intrinsics,
+        )
+        audit = WarpedSource(
+            warped_depth=warped_depth,
+            warped_depth_valid=warped_depth_valid,
+            source_intrinsics=warped_intrinsics,
+        )
+        return propagated, audit
+
+
 class AffinePropagator(nn.Module):
     """Per-sample affine propagator consumed by :class:`BatchCopyPaste`.
 
