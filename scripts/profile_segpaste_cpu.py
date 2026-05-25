@@ -1,4 +1,9 @@
-"""Profile segpaste on the worst CPU cell."""
+"""Profile segpaste on the worst CPU cell (debug tool; not a benchmark).
+
+Wall-clock numbers belong in :mod:`benchmarks.comparison.sweep`. This
+script is a flamegraph-shaped view of which operators dominate the hot
+path; not stable enough for quantitative comparison across runs.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,6 @@ def main() -> int:
     impl = build("segpaste")
     batches = impl.adapt(workload.build_batches())
 
-    # Warmup
     for _ in range(5):
         impl.step(batches[0])
 
@@ -32,23 +36,20 @@ def main() -> int:
         profile_memory=False,
         with_stack=False,
     ) as prof:
-        for i in range(10):
+        for i in range(50):
             with record_function(f"step_{i}"):
                 impl.step(batches[i % len(batches)])
 
-    print("\n== Top 25 CPU ops by self_cpu_time_total ==")
-    print(
-        prof.key_averages().table(
-            sort_by="self_cpu_time_total", row_limit=25, top_level_events_only=False
+    for title, sort_key in (
+        ("Top 25 CPU ops by self_cpu_time_total", "self_cpu_time_total"),
+        ("Top 25 CPU ops by cpu_time_total (includes child time)", "cpu_time_total"),
+    ):
+        print(f"\n== {title} ==")
+        print(
+            prof.key_averages().table(
+                sort_by=sort_key, row_limit=25, top_level_events_only=False
+            )
         )
-    )
-
-    print("\n== Top 25 CPU ops by cpu_time_total (includes child time) ==")
-    print(
-        prof.key_averages().table(
-            sort_by="cpu_time_total", row_limit=25, top_level_events_only=False
-        )
-    )
 
     return 0
 

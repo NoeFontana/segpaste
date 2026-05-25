@@ -122,11 +122,8 @@ class TileCompositor(nn.Module):
         )
 
         # OR-reduce over per-tile ``m_eff`` so audit dispatch can verify
-        # ADR-0001 §(ii) invariants against the effective paste union. The
-        # survivor instance_masks update is derived once from paste_union
-        # after the loop (ADR-0017 Fix 2) - that's algebraically equivalent
-        # to per-tile AND-update with the m_eff for each tile, but avoids
-        # the [B, K, H, W] clone + per-tile read-modify-write.
+        # ADR-0001 §(ii) invariants against the effective paste union; also
+        # consumed below to derive ``out_target_masks`` in a single pass.
         paste_union = torch.zeros((b, h, w), dtype=torch.bool, device=tgt_imgs.device)
 
         ts = self.config.tile_size
@@ -200,9 +197,9 @@ class TileCompositor(nn.Module):
                         target.normals[:, :, y0:y1, x0:x1],
                     )
 
-        # Single full-image survivor update; equivalent to the prior per-tile
-        # AND-with-~m3 chain because tiles partition (B, H, W) and
-        # paste_union[b, y, x] == OR_over_tiles(m_eff_tile[b, y, x]).
+        # Survivor instance_masks update: equivalent to the per-tile
+        # AND-with-~m_eff chain because tiles partition (B, H, W) and
+        # paste_union[b, y, x] == OR over tiles of m_eff[b, y, x].
         out_target_masks = (
             target.instance_masks & ~paste_union.unsqueeze(1)
             if target.instance_masks is not None
